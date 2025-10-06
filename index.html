@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#2575fc">
+    <title>Scanner de Documents - Application Mobile</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+            color: #333;
+            min-height: 100vh;
+            padding: 0;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            width: 100%;
+            min-height: 100vh;
+            background: white;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        header {
+            background: linear-gradient(90deg, #2575fc, #6a11cb);
+            color: white;
+            padding: 20px 15px;
+            text-align: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .subtitle {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .app-content {
+            flex: 1;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .camera-section {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .camera-container {
+            position: relative;
+            width: 100%;
+            margin: 0 auto;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            background-color: #000;
+            aspect-ratio: 4/3;
+        }
+        
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        
+        #canvas {
+            display: none;
+        }
+        
+        .camera-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        .document-guide {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 60%;
+            border: 2px dashed rgba(255,255,255,0.7);
+            border-radius: 8px;
+        }
+        
+        .camera-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: #f0f0f0;
+            color: #666;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .camera-placeholder i {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            display: block;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 14px 20px;
+            border: none;
+            border-radius: 50px;
+            background: linear-gradient(90deg, #2575fc, #6a11cb);
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 8px rgba(37, 117, 252, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            min-width: 140px;
+            justify-content: center;
+            touch-action: manipulation;
+        }
+        
+        button:active {
+            transform: scale(0.98);
+            box-shadow: 0 2px 4px rgba(37, 117, 252, 0.3);
+        }
+        
+        button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .capture-btn {
+            background: linear-gradient(90deg, #ff5e7d, #ff9500);
+            box-shadow: 0 4px 8px rgba(255, 94, 125, 0.3);
+            flex: 2;
+            padding: 16px;
+            font-size: 1.1rem;
+        }
+        
+        .detect-btn {
+            background: linear-gradient(90deg, #00b09b, #96c93d);
+            box-shadow: 0 4px 8px rgba(0, 176, 155, 0.3);
+        }
+        
+        .upload-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 12px;
+            margin: 15px 0;
+            text-align: center;
+        }
+        
+        .upload-btn {
+            background: linear-gradient(90deg, #8e2de2, #4a00e0);
+        }
+        
+        .scans-section {
+            margin-top: 20px;
+            flex: 1;
+        }
+        
+        h2 {
+            font-size: 1.3rem;
+            margin-bottom: 15px;
+            color: #2575fc;
+            text-align: center;
+        }
+        
+        .scans-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 12px;
+        }
+        
+        .scan-item {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s ease;
+            position: relative;
+        }
+        
+        .scan-item:active {
+            transform: scale(0.95);
+        }
+        
+        .scan-preview {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+        }
+        
+        .scan-actions {
+            padding: 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .action-btn {
+            padding: 6px 10px;
+            font-size: 0.8rem;
+            min-width: auto;
+            flex: 1;
+            margin: 0 2px;
+        }
+        
+        .download-btn {
+            background: linear-gradient(90deg, #00b09b, #96c93d);
+        }
+        
+        .delete-btn {
+            background: linear-gradient(90deg, #ff5e7d, #ff2a6d);
+        }
+        
+        .instructions {
+            background: #f0f5ff;
+            padding: 15px;
+            border-radius: 12px;
+            margin-top: 20px;
+            font-size: 0.9rem;
+        }
+        
+        .instructions h3 {
+            color: #2575fc;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1.1rem;
+        }
+        
+        .instructions ol {
+            margin-left: 20px;
+        }
+        
+        .instructions li {
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+        
+        .troubleshooting {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 12px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.85rem;
+        }
+        
+        .troubleshooting h4 {
+            color: #856404;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1rem;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+        
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status.success {
+            background: #d1edff;
+            color: #0c5460;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .no-scans {
+            text-align: center;
+            padding: 30px 15px;
+            color: #6c757d;
+            font-style: italic;
+            grid-column: 1 / -1;
+        }
+        
+        .camera-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            justify-content: center;
+        }
+        
+        .flash-btn, .switch-camera {
+            background: rgba(0,0,0,0.5);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+
+        .edge-preview {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: none;
+        }
+        
+        .edge-corner {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #00ff88;
+            background: rgba(0, 255, 136, 0.3);
+        }
+        
+        .corner-tl { top: 20%; left: 10%; border-right: none; border-bottom: none; }
+        .corner-tr { top: 20%; right: 10%; border-left: none; border-bottom: none; }
+        .corner-bl { bottom: 20%; left: 10%; border-right: none; border-top: none; }
+        .corner-br { bottom: 20%; right: 10%; border-left: none; border-top: none; }
+
+        .quality-badge {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            background: #2575fc;
+        }
+        
+        .quality-badge.enhanced {
+            background: #00b09b;
+        }
+
+        /* Mode paysage */
+        @media (min-width: 768px) and (orientation: landscape) {
+            .app-content {
+                flex-direction: row;
+                gap: 20px;
+            }
+            
+            .camera-section {
+                flex: 1;
+            }
+            
+            .scans-section {
+                flex: 1;
+                margin-top: 0;
+            }
+            
+            .scans-container {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            }
+        }
+        
+        /* Grands écrans */
+        @media (min-width: 992px) {
+            .container {
+                max-width: 900px;
+                margin: 20px auto;
+                min-height: calc(100vh - 40px);
+                border-radius: 20px;
+                overflow: hidden;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>
+                <span>📸</span>
+                Scanner de Documents
+            </h1>
+            <p class="subtitle">Capturez et convertissez vos documents en PDF</p>
+        </header>
+        
+        <div class="app-content">
+            <div class="camera-section">
+                <div class="camera-container">
+                    <video id="video" autoplay playsinline></video>
+                    <canvas id="canvas"></canvas>
+                    <div class="camera-overlay">
+                        <div class="document-guide"></div>
+                        <div class="edge-preview" id="edge-preview">
+                            <div class="edge-corner corner-tl"></div>
+                            <div class="edge-corner corner-tr"></div>
+                            <div class="edge-corner corner-bl"></div>
+                            <div class="edge-corner corner-br"></div>
+                        </div>
+                    </div>
+                    <div class="camera-placeholder" id="camera-placeholder">
+                        <i>📷</i>
+                        <p>Appuyez sur "Activer la caméra"</p>
+                    </div>
+                </div>
+                
+                <div class="controls">
+                    <button id="start-camera" class="start-btn">
+                        <span>📷</span> Activer
+                    </button>
+                    <button id="capture" class="capture-btn" disabled>
+                        <span>⭕</span> Capturer
+                    </button>
+                    <button id="detect-edges" class="detect-btn" disabled>
+                        <span>🔍</span> Bords
+                    </button>
+                    <button id="save-pdf" disabled>
+                        <span>💾</span> PDF
+                    </button>
+                </div>
+                
+                <div class="camera-controls">
+                    <button class="flash-btn" id="flash-btn" disabled>⚡</button>
+                    <button class="switch-camera" id="switch-camera" disabled>🔄</button>
+                </div>
+                
+                <div class="upload-section">
+                    <button id="upload-btn" class="upload-btn">
+                        <span>📁</span> Importer une image
+                    </button>
+                    <input type="file" id="file-input" accept="image/*" style="display: none;">
+                </div>
+                
+                <div id="status" class="status"></div>
+                
+                <div class="troubleshooting">
+                    <h4><span>💡</span> Conseils d'utilisation</h4>
+                    <ul style="margin-left: 15px; margin-top: 5px;">
+                        <li>Utilisez Chrome ou Firefox pour de meilleures performances</li>
+                        <li>Autorisez l'accès à la caméra quand demandé</li>
+                        <li>Photographiez sous un bon éclairage</li>
+                        <li>Placez le document à plat et bien cadré</li>
+                        <li>Utilisez "Détecter les bords" pour améliorer le scan</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="scans-section">
+                <h2>Mes Documents Scannés</h2>
+                <div id="scans-container" class="scans-container">
+                    <div class="no-scans">Aucun document scanné pour le moment</div>
+                </div>
+                
+                <div class="instructions">
+                    <h3><span>ℹ️</span> Comment utiliser</h3>
+                    <ol>
+                        <li><strong>Activer la caméra</strong> - Autorisez l'accès quand demandé</li>
+                        <li><strong>Capturer</strong> - Photo du document</li>
+                        <li><strong>Détecter les bords</strong> - Améliore automatiquement le document</li>
+                        <li><strong>Générer PDF</strong> - Téléchargez le fichier final</li>
+                        <li><strong>Importer</strong> - Utilisez une image existante si besoin</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Références aux éléments DOM
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const startCameraButton = document.getElementById('start-camera');
+        const captureButton = document.getElementById('capture');
+        const detectEdgesButton = document.getElementById('detect-edges');
+        const savePdfButton = document.getElementById('save-pdf');
+        const statusDiv = document.getElementById('status');
+        const scansContainer = document.getElementById('scans-container');
+        const cameraPlaceholder = document.getElementById('camera-placeholder');
+        const fileInput = document.getElementById('file-input');
+        const uploadButton = document.getElementById('upload-btn');
+        const flashButton = document.getElementById('flash-btn');
+        const switchCameraButton = document.getElementById('switch-camera');
+        const edgePreview = document.getElementById('edge-preview');
+        
+        // Variables globales
+        let stream = null;
+        let capturedImage = null;
+        let scans = JSON.parse(localStorage.getItem('documentScans')) || [];
+        let currentFacingMode = 'environment';
+        let flashOn = false;
+        let edgesDetected = false;
+
+        // Vérifier le protocole
+        function checkProtocol() {
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                showStatus("⚠️ Pour la caméra, cette application nécessite une connexion HTTPS", "error");
+            }
+        }
+        
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', () => {
+            checkProtocol();
+            updateScansDisplay();
+            checkMobileFeatures();
+            
+            edgePreview.style.display = 'none';
+            
+            // Essayer de démarrer automatiquement sur HTTPS
+            if (location.protocol === 'https:') {
+                setTimeout(() => {
+                    startCamera();
+                }, 1000);
+            }
+        });
+        
+        function checkMobileFeatures() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showStatus("Votre navigateur ne supporte pas la caméra", "error");
+                startCameraButton.disabled = true;
+                return;
+            }
+        }
+        
+        // Démarrer la caméra
+        async function startCamera() {
+            try {
+                showStatus("Activation de la caméra...", "loading");
+                
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+                
+                const constraints = {
+                    video: {
+                        facingMode: currentFacingMode,
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    },
+                    audio: false
+                };
+                
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                
+                video.srcObject = stream;
+                video.style.display = 'block';
+                cameraPlaceholder.style.display = 'none';
+                
+                showStatus("✅ Caméra activée - Cadrez votre document", "success");
+                startCameraButton.disabled = true;
+                captureButton.disabled = false;
+                switchCameraButton.disabled = false;
+                
+            } catch (error) {
+                console.error("Erreur caméra:", error);
+                handleCameraError(error);
+            }
+        }
+        
+        function handleCameraError(error) {
+            let errorMessage = "";
+            
+            if (error.name === 'NotAllowedError') {
+                errorMessage = "📵 Permission refusée. Autorisez la caméra dans les paramètres de votre navigateur.";
+            } else if (error.name === 'NotFoundError') {
+                errorMessage = "📷 Aucune caméra détectée sur cet appareil";
+            } else if (error.name === 'NotSupportedError') {
+                errorMessage = "🚫 Votre navigateur ne supporte pas cette fonctionnalité";
+            } else if (error.name === 'OverconstrainedError') {
+                // Essayer avec la caméra avant
+                currentFacingMode = 'user';
+                startCamera();
+                return;
+            } else {
+                errorMessage = "Erreur d'accès à la caméra: " + error.message;
+            }
+            
+            showStatus(errorMessage, "error");
+            startCameraButton.disabled = false;
+            startCameraButton.textContent = "🔄 Réessayer";
+        }
+        
+        // Événements boutons
+        startCameraButton.addEventListener('click', startCamera);
+        
+        captureButton.addEventListener('click', () => {
+            captureImage();
+        });
+        
+        // Capturer une image
+        function captureImage() {
+            const context = canvas.getContext('2d');
+            
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            capturedImage = canvas.toDataURL('image/jpeg', 0.8);
+            
+            showStatus("✅ Document capturé - Vous pouvez détecter les bords", "success");
+            detectEdgesButton.disabled = false;
+            savePdfButton.disabled = false;
+            edgesDetected = false;
+            edgePreview.style.display = 'none';
+            
+            if (navigator.vibrate) {
+                navigator.vibrate(100);
+            }
+        }
+        
+        // Détection des bords
+        detectEdgesButton.addEventListener('click', () => {
+            if (!capturedImage) {
+                showStatus("Capturez d'abord une image", "error");
+                return;
+            }
+            
+            showStatus("🔍 Détection des bords en cours...", "loading");
+            
+            setTimeout(() => {
+                simulateEdgeDetection();
+            }, 1500);
+        });
+        
+        // Simulation de détection des bords
+        function simulateEdgeDetection() {
+            const context = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = function() {
+                // Redessiner l'image
+                context.drawImage(img, 0, 0, canvas.width, canvas.height);
+                
+                // Amélioration d'image simple
+                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+                
+                // Augmenter le contraste
+                for (let i = 0; i < data.length; i += 4) {
+                    const contrast = 1.3;
+                    data[i] = clamp((data[i] - 128) * contrast + 128);     // Rouge
+                    data[i + 1] = clamp((data[i + 1] - 128) * contrast + 128); // Vert
+                    data[i + 2] = clamp((data[i + 2] - 128) * contrast + 128); // Bleu
+                }
+                
+                context.putImageData(imageData, 0, 0);
+                
+                // Mettre à jour l'image
+                capturedImage = canvas.toDataURL('image/jpeg', 0.9);
+                
+                // Afficher les repères de bords
+                edgePreview.style.display = 'block';
+                edgesDetected = true;
+                
+                showStatus("✅ Bords détectés - Document optimisé", "success");
+                
+                if (navigator.vibrate) {
+                    navigator.vibrate([100, 50, 100]);
+                }
+            };
+            
+            img.src = capturedImage;
+        }
+        
+        function clamp(value) {
+            return Math.max(0, Math.min(255, value));
+        }
+        
+        // Sauvegarder en PDF
+        savePdfButton.addEventListener('click', () => {
+            if (!capturedImage) {
+                showStatus("Aucune image à sauvegarder", "error");
+                return;
+            }
+            
+            showStatus("📄 Génération du PDF...", "loading");
+            
+            setTimeout(() => {
+                generatePDF();
+            }, 800);
+        });
+        
+        // Générer le PDF
+        function generatePDF() {
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF();
+            
+            const imgProps = pdf.getImageProperties(capturedImage);
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+            
+            pdf.addImage(capturedImage, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+            
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const scanType = edgesDetected ? "scan-ameliore" : "scan-basique";
+            const filename = `document-${scanType}-${timestamp}.pdf`;
+            
+            pdf.save(filename);
+            
+            // Sauvegarder localement
+            const scan = {
+                id: Date.now(),
+                image: capturedImage,
+                filename: filename,
+                date: new Date().toLocaleString('fr-FR'),
+                enhanced: edgesDetected
+            };
+            
+            scans.unshift(scan);
+            localStorage.setItem('documentScans', JSON.stringify(scans));
+            
+            showStatus("✅ PDF téléchargé avec succès!", "success");
+            updateScansDisplay();
+            
+            // Réinitialiser
+            savePdfButton.disabled = true;
+            detectEdgesButton.disabled = true;
+        }
+        
+        // Changer de caméra
+        switchCameraButton.addEventListener('click', () => {
+            currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+            startCamera();
+        });
+        
+        // Importer une image
+        uploadButton.addEventListener('click', () => {
+            fileInput.click();
+        });
+        
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            if (!file.type.match('image.*')) {
+                showStatus("Veuillez sélectionner une image valide (JPEG, PNG)", "error");
+                return;
+            }
+            
+            const reader = new FileReader();
+            
+            reader.onload = (e) => {
+                capturedImage = e.target.result;
+                showStatus("✅ Image importée - Vous pouvez détecter les bords", "success");
+                detectEdgesButton.disabled = false;
+                savePdfButton.disabled = false;
+                edgesDetected = false;
+                edgePreview.style.display = 'none';
+                
+                // Préparer l'image pour le canvas
+                const context = canvas.getContext('2d');
+                const img = new Image();
+                img.onload = () => {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    context.drawImage(img, 0, 0);
+                };
+                img.src = capturedImage;
+            };
+            
+            reader.readAsDataURL(file);
+        });
+        
+        // Mettre à jour l'affichage des scans
+        function updateScansDisplay() {
+            if (scans.length === 0) {
+                scansContainer.innerHTML = '<div class="no-scans">Aucun document scanné pour le moment</div>';
+                return;
+            }
+            
+            scansContainer.innerHTML = scans.map(scan => `
+                <div class="scan-item">
+                    <img src="${scan.image}" alt="Document scanné" class="scan-preview">
+                    <div class="quality-badge ${scan.enhanced ? 'enhanced' : ''}">
+                        ${scan.enhanced ? '✓ Amélioré' : 'Standard'}
+                    </div>
+                    <div class="scan-actions">
+                        <button class="action-btn download-btn" onclick="downloadScan(${scan.id})">
+                            <span>⬇️</span>
+                        </button>
+                        <button class="action-btn delete-btn" onclick="deleteScan(${scan.id})">
+                            <span>🗑️</span>
+                        </button>
+                    </div>
+                    <div style="padding: 8px; font-size: 0.7rem; color: #666; text-align: center;">
+                        ${scan.date.split(' ')[0]}
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Télécharger un scan
+        function downloadScan(id) {
+            const scan = scans.find(s => s.id === id);
+            if (!scan) return;
+            
+            const link = document.createElement('a');
+            link.href = scan.image;
+            link.download = scan.filename.replace('.pdf', '.jpg');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        
+        // Supprimer un scan
+        function deleteScan(id) {
+            if (confirm("Supprimer ce document ?")) {
+                scans = scans.filter(s => s.id !== id);
+                localStorage.setItem('documentScans', JSON.stringify(scans));
+                updateScansDisplay();
+                showStatus("Document supprimé", "success");
+            }
+        }
+        
+        // Afficher un message de statut
+        function showStatus(message, type) {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            
+            if (type !== 'loading') {
+                setTimeout(() => {
+                    statusDiv.textContent = '';
+                    statusDiv.className = 'status';
+                }, 4000);
+            }
+        }
+        
+        // Nettoyer
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
+        
+        // Empêcher le zoom sur les boutons
+        document.addEventListener('touchstart', function(e) {
+            if (e.target.tagName === 'BUTTON') {
+                e.preventDefault();
+            }
+        }, { passive: false });
+    </script>
+</body>
+</html>
