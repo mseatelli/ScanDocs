@@ -161,6 +161,7 @@
             touch-action: manipulation;
             user-select: none;
             -webkit-user-select: none;
+            position: relative;
         }
         
         button:active {
@@ -173,14 +174,20 @@
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
+            opacity: 0.6;
         }
         
         .capture-btn {
             background: linear-gradient(90deg, #ff5e7d, #ff9500);
             box-shadow: 0 4px 8px rgba(255, 94, 125, 0.3);
             flex: 2;
-            padding: 16px;
-            font-size: 1.1rem;
+            padding: 18px;
+            font-size: 1.2rem;
+            min-height: 60px;
+        }
+        
+        .capture-btn:active {
+            background: linear-gradient(90deg, #e04a6d, #e08500);
         }
         
         .detect-btn {
@@ -244,11 +251,12 @@
         }
         
         .action-btn {
-            padding: 6px 10px;
+            padding: 8px 12px;
             font-size: 0.8rem;
             min-width: auto;
             flex: 1;
             margin: 0 2px;
+            min-height: 35px;
         }
         
         .download-btn {
@@ -353,6 +361,7 @@
             align-items: center;
             justify-content: center;
             font-size: 1.2rem;
+            touch-action: manipulation;
         }
 
         .edge-preview {
@@ -457,6 +466,17 @@
                 overflow: hidden;
                 box-shadow: 0 10px 30px rgba(0,0,0,0.2);
             }
+        }
+
+        /* Animation de pulse pour le bouton capture */
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .capture-btn.pulse {
+            animation: pulse 2s infinite;
         }
     </style>
 </head>
@@ -577,40 +597,105 @@
         let flashOn = false;
         let edgesDetected = false;
         let isProcessing = false;
+        let lastCaptureTime = 0;
+        const CAPTURE_COOLDOWN = 1000; // 1 seconde entre les captures
 
-        // Amélioration de la réactivité des boutons
+        // Configuration améliorée des boutons
         function setupButtonListeners() {
-            const buttons = [startCameraButton, captureButton, detectEdgesButton, savePdfButton, uploadButton];
+            // Bouton Capture - Gestion spécifique
+            setupCaptureButton();
             
-            buttons.forEach(button => {
+            // Autres boutons
+            const otherButtons = [startCameraButton, detectEdgesButton, savePdfButton, uploadButton];
+            otherButtons.forEach(button => {
                 if (button) {
-                    // Événements pour mobile
-                    button.addEventListener('touchstart', function(e) {
-                        if (!this.disabled) {
-                            this.style.transform = 'scale(0.95)';
-                            this.style.opacity = '0.8';
-                        }
-                        e.preventDefault();
-                    }, { passive: false });
-                    
-                    button.addEventListener('touchend', function(e) {
-                        if (!this.disabled) {
-                            this.style.transform = '';
-                            this.style.opacity = '';
-                        }
-                        e.preventDefault();
-                    }, { passive: false });
-                    
-                    button.addEventListener('click', function(e) {
-                        if (!this.disabled) {
-                            // Feedback haptique
-                            if (navigator.vibrate) {
-                                navigator.vibrate(50);
-                            }
-                        }
-                    });
+                    button.addEventListener('click', handleButtonClick);
+                    button.addEventListener('touchstart', handleTouchStart, { passive: true });
+                    button.addEventListener('touchend', handleTouchEnd, { passive: true });
                 }
             });
+        }
+
+        function setupCaptureButton() {
+            if (!captureButton) return;
+            
+            // Supprimer les anciens écouteurs
+            captureButton.replaceWith(captureButton.cloneNode(true));
+            const newCaptureButton = document.getElementById('capture');
+            
+            // Nouveaux écouteurs
+            newCaptureButton.addEventListener('click', handleCaptureClick);
+            newCaptureButton.addEventListener('touchstart', handleCaptureTouchStart, { passive: true });
+            newCaptureButton.addEventListener('touchend', handleCaptureTouchEnd, { passive: true });
+            
+            // Animation de pulse quand activé
+            const observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(mutation) {
+                    if (mutation.type === 'attributes' && mutation.attributeName === 'disabled') {
+                        if (!newCaptureButton.disabled) {
+                            newCaptureButton.classList.add('pulse');
+                        } else {
+                            newCaptureButton.classList.remove('pulse');
+                        }
+                    }
+                });
+            });
+            
+            observer.observe(newCaptureButton, { attributes: true });
+        }
+
+        function handleCaptureClick(e) {
+            if (isProcessing || captureButton.disabled) return;
+            
+            const now = Date.now();
+            if (now - lastCaptureTime < CAPTURE_COOLDOWN) return;
+            
+            lastCaptureTime = now;
+            captureImage();
+            
+            // Feedback visuel immédiat
+            captureButton.style.transform = 'scale(0.9)';
+            setTimeout(() => {
+                captureButton.style.transform = '';
+            }, 200);
+        }
+
+        function handleCaptureTouchStart(e) {
+            if (!captureButton.disabled) {
+                captureButton.style.opacity = '0.8';
+                captureButton.style.transform = 'scale(0.95)';
+            }
+        }
+
+        function handleCaptureTouchEnd(e) {
+            if (!captureButton.disabled) {
+                captureButton.style.opacity = '';
+                captureButton.style.transform = '';
+                
+                // Déclencher la capture
+                const clickEvent = new Event('click');
+                captureButton.dispatchEvent(clickEvent);
+            }
+        }
+
+        function handleButtonClick(e) {
+            if (!this.disabled && !isProcessing) {
+                if (navigator.vibrate) navigator.vibrate(50);
+            }
+        }
+
+        function handleTouchStart(e) {
+            if (!this.disabled) {
+                this.style.opacity = '0.8';
+                this.style.transform = 'scale(0.95)';
+            }
+        }
+
+        function handleTouchEnd(e) {
+            if (!this.disabled) {
+                this.style.opacity = '';
+                this.style.transform = '';
+            }
         }
 
         // Vérifier le protocole
@@ -702,26 +787,32 @@
             startCameraButton.textContent = "🔄 Réessayer";
         }
         
-        // Capturer une image
+        // Capturer une image - Version simplifiée et plus robuste
         function captureImage() {
-            if (isProcessing) return;
+            if (isProcessing || !stream) return;
             
-            const context = canvas.getContext('2d');
-            
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
-            capturedImage = canvas.toDataURL('image/jpeg', 0.8);
-            
-            showStatus("✅ Document capturé - Vous pouvez détecter les contours", "success");
-            detectEdgesButton.disabled = false;
-            savePdfButton.disabled = false;
-            edgesDetected = false;
-            edgePreview.style.display = 'none';
-            
-            if (navigator.vibrate) {
-                navigator.vibrate(100);
+            try {
+                const context = canvas.getContext('2d');
+                
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                capturedImage = canvas.toDataURL('image/jpeg', 0.8);
+                
+                showStatus("✅ Document capturé", "success");
+                detectEdgesButton.disabled = false;
+                savePdfButton.disabled = false;
+                edgesDetected = false;
+                edgePreview.style.display = 'none';
+                
+                if (navigator.vibrate) {
+                    navigator.vibrate(100);
+                }
+                
+            } catch (error) {
+                console.error("Erreur capture:", error);
+                showStatus("❌ Erreur lors de la capture", "error");
             }
         }
         
@@ -733,7 +824,6 @@
             processingOverlay.style.display = 'flex';
             showStatus("🔍 Analyse de l'image en cours...", "loading");
             
-            // Simulation plus réaliste avec délai variable
             const processingTime = 1000 + Math.random() * 1000;
             
             setTimeout(() => {
@@ -746,10 +836,8 @@
             const img = new Image();
             
             img.onload = function() {
-                // Redessiner l'image
                 context.drawImage(img, 0, 0, canvas.width, canvas.height);
                 
-                // Simulation de détection de contours avec position aléatoire réaliste
                 const marginHorizontal = canvas.width * 0.1 + Math.random() * canvas.width * 0.1;
                 const marginVertical = canvas.height * 0.1 + Math.random() * canvas.height * 0.1;
                 
@@ -760,13 +848,8 @@
                     height: canvas.height - (marginVertical * 2)
                 };
                 
-                // Amélioration d'image
                 enhanceImage(context, canvas.width, canvas.height);
-                
-                // Mettre à jour l'image
                 capturedImage = canvas.toDataURL('image/jpeg', 0.9);
-                
-                // Afficher le contour détecté
                 showDetectedDocument(detectedRect);
                 edgesDetected = true;
                 
@@ -786,15 +869,12 @@
             const imageData = context.getImageData(0, 0, width, height);
             const data = imageData.data;
             
-            // Amélioration du contraste
             for (let i = 0; i < data.length; i += 4) {
-                // Augmenter le contraste
                 const contrast = 1.4;
                 data[i] = clamp((data[i] - 128) * contrast + 128);
                 data[i + 1] = clamp((data[i + 1] - 128) * contrast + 128);
                 data[i + 2] = clamp((data[i + 2] - 128) * contrast + 128);
                 
-                // Léger ajustement de la luminosité
                 data[i] = clamp(data[i] * 1.1);
                 data[i + 1] = clamp(data[i + 1] * 1.1);
                 data[i + 2] = clamp(data[i + 2] * 1.1);
@@ -815,7 +895,6 @@
             
             edgePreview.style.display = 'block';
             
-            // Animation d'apparition
             documentOutline.style.transform = 'scale(0.8)';
             documentOutline.style.opacity = '0';
             
@@ -832,7 +911,6 @@
         
         // Événements boutons
         startCameraButton.addEventListener('click', startCamera);
-        captureButton.addEventListener('click', captureImage);
         detectEdgesButton.addEventListener('click', detectEdges);
         
         // Sauvegarder en PDF
@@ -866,7 +944,6 @@
             
             pdf.save(filename);
             
-            // Sauvegarder localement
             const scan = {
                 id: Date.now(),
                 image: capturedImage,
@@ -881,7 +958,6 @@
             showStatus("✅ PDF téléchargé avec succès!", "success");
             updateScansDisplay();
             
-            // Réinitialiser
             savePdfButton.disabled = true;
             detectEdgesButton.disabled = true;
         }
@@ -916,7 +992,6 @@
                 edgesDetected = false;
                 edgePreview.style.display = 'none';
                 
-                // Préparer l'image pour le canvas
                 const context = canvas.getContext('2d');
                 const img = new Image();
                 img.onload = () => {
@@ -1003,13 +1078,6 @@
                 stream.getTracks().forEach(track => track.stop());
             }
         });
-        
-        // Empêcher les comportements indésirables
-        document.addEventListener('touchstart', function(e) {
-            if (e.target.tagName === 'BUTTON') {
-                e.preventDefault();
-            }
-        }, { passive: false });
     </script>
 </body>
 </html>
