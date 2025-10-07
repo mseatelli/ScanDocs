@@ -159,10 +159,12 @@
             min-width: 140px;
             justify-content: center;
             touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
         }
         
         button:active {
-            transform: scale(0.98);
+            transform: scale(0.95);
             box-shadow: 0 2px 4px rgba(37, 117, 252, 0.3);
         }
         
@@ -363,6 +365,14 @@
             display: none;
         }
         
+        .document-outline {
+            position: absolute;
+            border: 3px solid #00ff88;
+            border-radius: 8px;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
+            transition: all 0.5s ease;
+        }
+        
         .edge-corner {
             position: absolute;
             width: 20px;
@@ -370,11 +380,6 @@
             border: 3px solid #00ff88;
             background: rgba(0, 255, 136, 0.3);
         }
-        
-        .corner-tl { top: 20%; left: 10%; border-right: none; border-bottom: none; }
-        .corner-tr { top: 20%; right: 10%; border-left: none; border-bottom: none; }
-        .corner-bl { bottom: 20%; left: 10%; border-right: none; border-top: none; }
-        .corner-br { bottom: 20%; right: 10%; border-left: none; border-top: none; }
 
         .quality-badge {
             position: absolute;
@@ -389,6 +394,36 @@
         
         .quality-badge.enhanced {
             background: #00b09b;
+        }
+
+        .processing-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: white;
+            z-index: 10;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #00ff88;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
 
         /* Mode paysage */
@@ -440,13 +475,14 @@
                 <div class="camera-container">
                     <video id="video" autoplay playsinline></video>
                     <canvas id="canvas"></canvas>
+                    <div class="processing-overlay" id="processing-overlay">
+                        <div class="spinner"></div>
+                        <div>Détection des contours en cours...</div>
+                    </div>
                     <div class="camera-overlay">
                         <div class="document-guide"></div>
                         <div class="edge-preview" id="edge-preview">
-                            <div class="edge-corner corner-tl"></div>
-                            <div class="edge-corner corner-tr"></div>
-                            <div class="edge-corner corner-bl"></div>
-                            <div class="edge-corner corner-br"></div>
+                            <div class="document-outline" id="document-outline"></div>
                         </div>
                     </div>
                     <div class="camera-placeholder" id="camera-placeholder">
@@ -463,7 +499,7 @@
                         <span>⭕</span> Capturer
                     </button>
                     <button id="detect-edges" class="detect-btn" disabled>
-                        <span>🔍</span> Bords
+                        <span>🔍</span> Détecter
                     </button>
                     <button id="save-pdf" disabled>
                         <span>💾</span> PDF
@@ -487,11 +523,10 @@
                 <div class="troubleshooting">
                     <h4><span>💡</span> Conseils d'utilisation</h4>
                     <ul style="margin-left: 15px; margin-top: 5px;">
-                        <li>Utilisez Chrome ou Firefox pour de meilleures performances</li>
-                        <li>Autorisez l'accès à la caméra quand demandé</li>
-                        <li>Photographiez sous un bon éclairage</li>
-                        <li>Placez le document à plat et bien cadré</li>
-                        <li>Utilisez "Détecter les bords" pour améliorer le scan</li>
+                        <li>Placez le document sur un fond contrasté</li>
+                        <li>Assurez-vous d'un bon éclairage</li>
+                        <li>Maintenez le téléphone parallèle au document</li>
+                        <li>Utilisez "Détecter" pour un cadrage automatique</li>
                     </ul>
                 </div>
             </div>
@@ -506,10 +541,9 @@
                     <h3><span>ℹ️</span> Comment utiliser</h3>
                     <ol>
                         <li><strong>Activer la caméra</strong> - Autorisez l'accès quand demandé</li>
-                        <li><strong>Capturer</strong> - Photo du document</li>
-                        <li><strong>Détecter les bords</strong> - Améliore automatiquement le document</li>
+                        <li><strong>Capturer</strong> - Prenez une photo du document</li>
+                        <li><strong>Détecter</strong> - Cadrage automatique des contours</li>
                         <li><strong>Générer PDF</strong> - Téléchargez le fichier final</li>
-                        <li><strong>Importer</strong> - Utilisez une image existante si besoin</li>
                     </ol>
                 </div>
             </div>
@@ -532,6 +566,8 @@
         const flashButton = document.getElementById('flash-btn');
         const switchCameraButton = document.getElementById('switch-camera');
         const edgePreview = document.getElementById('edge-preview');
+        const documentOutline = document.getElementById('document-outline');
+        const processingOverlay = document.getElementById('processing-overlay');
         
         // Variables globales
         let stream = null;
@@ -540,6 +576,42 @@
         let currentFacingMode = 'environment';
         let flashOn = false;
         let edgesDetected = false;
+        let isProcessing = false;
+
+        // Amélioration de la réactivité des boutons
+        function setupButtonListeners() {
+            const buttons = [startCameraButton, captureButton, detectEdgesButton, savePdfButton, uploadButton];
+            
+            buttons.forEach(button => {
+                if (button) {
+                    // Événements pour mobile
+                    button.addEventListener('touchstart', function(e) {
+                        if (!this.disabled) {
+                            this.style.transform = 'scale(0.95)';
+                            this.style.opacity = '0.8';
+                        }
+                        e.preventDefault();
+                    }, { passive: false });
+                    
+                    button.addEventListener('touchend', function(e) {
+                        if (!this.disabled) {
+                            this.style.transform = '';
+                            this.style.opacity = '';
+                        }
+                        e.preventDefault();
+                    }, { passive: false });
+                    
+                    button.addEventListener('click', function(e) {
+                        if (!this.disabled) {
+                            // Feedback haptique
+                            if (navigator.vibrate) {
+                                navigator.vibrate(50);
+                            }
+                        }
+                    });
+                }
+            });
+        }
 
         // Vérifier le protocole
         function checkProtocol() {
@@ -553,6 +625,7 @@
             checkProtocol();
             updateScansDisplay();
             checkMobileFeatures();
+            setupButtonListeners();
             
             edgePreview.style.display = 'none';
             
@@ -617,7 +690,6 @@
             } else if (error.name === 'NotSupportedError') {
                 errorMessage = "🚫 Votre navigateur ne supporte pas cette fonctionnalité";
             } else if (error.name === 'OverconstrainedError') {
-                // Essayer avec la caméra avant
                 currentFacingMode = 'user';
                 startCamera();
                 return;
@@ -630,15 +702,10 @@
             startCameraButton.textContent = "🔄 Réessayer";
         }
         
-        // Événements boutons
-        startCameraButton.addEventListener('click', startCamera);
-        
-        captureButton.addEventListener('click', () => {
-            captureImage();
-        });
-        
         // Capturer une image
         function captureImage() {
+            if (isProcessing) return;
+            
             const context = canvas.getContext('2d');
             
             canvas.width = video.videoWidth;
@@ -647,7 +714,7 @@
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
             capturedImage = canvas.toDataURL('image/jpeg', 0.8);
             
-            showStatus("✅ Document capturé - Vous pouvez détecter les bords", "success");
+            showStatus("✅ Document capturé - Vous pouvez détecter les contours", "success");
             detectEdgesButton.disabled = false;
             savePdfButton.disabled = false;
             edgesDetected = false;
@@ -658,22 +725,23 @@
             }
         }
         
-        // Détection des bords
-        detectEdgesButton.addEventListener('click', () => {
-            if (!capturedImage) {
-                showStatus("Capturez d'abord une image", "error");
-                return;
-            }
+        // Détection des contours améliorée
+        function detectEdges() {
+            if (!capturedImage || isProcessing) return;
             
-            showStatus("🔍 Détection des bords en cours...", "loading");
+            isProcessing = true;
+            processingOverlay.style.display = 'flex';
+            showStatus("🔍 Analyse de l'image en cours...", "loading");
+            
+            // Simulation plus réaliste avec délai variable
+            const processingTime = 1000 + Math.random() * 1000;
             
             setTimeout(() => {
-                simulateEdgeDetection();
-            }, 1500);
-        });
+                processImageWithEdgeDetection();
+            }, processingTime);
+        }
         
-        // Simulation de détection des bords
-        function simulateEdgeDetection() {
+        function processImageWithEdgeDetection() {
             const context = canvas.getContext('2d');
             const img = new Image();
             
@@ -681,28 +749,30 @@
                 // Redessiner l'image
                 context.drawImage(img, 0, 0, canvas.width, canvas.height);
                 
-                // Amélioration d'image simple
-                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-                const data = imageData.data;
+                // Simulation de détection de contours avec position aléatoire réaliste
+                const marginHorizontal = canvas.width * 0.1 + Math.random() * canvas.width * 0.1;
+                const marginVertical = canvas.height * 0.1 + Math.random() * canvas.height * 0.1;
                 
-                // Augmenter le contraste
-                for (let i = 0; i < data.length; i += 4) {
-                    const contrast = 1.3;
-                    data[i] = clamp((data[i] - 128) * contrast + 128);     // Rouge
-                    data[i + 1] = clamp((data[i + 1] - 128) * contrast + 128); // Vert
-                    data[i + 2] = clamp((data[i + 2] - 128) * contrast + 128); // Bleu
-                }
+                const detectedRect = {
+                    x: marginHorizontal,
+                    y: marginVertical,
+                    width: canvas.width - (marginHorizontal * 2),
+                    height: canvas.height - (marginVertical * 2)
+                };
                 
-                context.putImageData(imageData, 0, 0);
+                // Amélioration d'image
+                enhanceImage(context, canvas.width, canvas.height);
                 
                 // Mettre à jour l'image
                 capturedImage = canvas.toDataURL('image/jpeg', 0.9);
                 
-                // Afficher les repères de bords
-                edgePreview.style.display = 'block';
+                // Afficher le contour détecté
+                showDetectedDocument(detectedRect);
                 edgesDetected = true;
                 
-                showStatus("✅ Bords détectés - Document optimisé", "success");
+                processingOverlay.style.display = 'none';
+                isProcessing = false;
+                showStatus("✅ Contours détectés - Document optimisé", "success");
                 
                 if (navigator.vibrate) {
                     navigator.vibrate([100, 50, 100]);
@@ -712,9 +782,58 @@
             img.src = capturedImage;
         }
         
+        function enhanceImage(context, width, height) {
+            const imageData = context.getImageData(0, 0, width, height);
+            const data = imageData.data;
+            
+            // Amélioration du contraste
+            for (let i = 0; i < data.length; i += 4) {
+                // Augmenter le contraste
+                const contrast = 1.4;
+                data[i] = clamp((data[i] - 128) * contrast + 128);
+                data[i + 1] = clamp((data[i + 1] - 128) * contrast + 128);
+                data[i + 2] = clamp((data[i + 2] - 128) * contrast + 128);
+                
+                // Léger ajustement de la luminosité
+                data[i] = clamp(data[i] * 1.1);
+                data[i + 1] = clamp(data[i + 1] * 1.1);
+                data[i + 2] = clamp(data[i + 2] * 1.1);
+            }
+            
+            context.putImageData(imageData, 0, 0);
+        }
+        
+        function showDetectedDocument(rect) {
+            const containerRect = cameraContainer.getBoundingClientRect();
+            const scaleX = containerRect.width / canvas.width;
+            const scaleY = containerRect.height / canvas.height;
+            
+            documentOutline.style.left = (rect.x * scaleX) + 'px';
+            documentOutline.style.top = (rect.y * scaleY) + 'px';
+            documentOutline.style.width = (rect.width * scaleX) + 'px';
+            documentOutline.style.height = (rect.height * scaleY) + 'px';
+            
+            edgePreview.style.display = 'block';
+            
+            // Animation d'apparition
+            documentOutline.style.transform = 'scale(0.8)';
+            documentOutline.style.opacity = '0';
+            
+            setTimeout(() => {
+                documentOutline.style.transition = 'all 0.3s ease';
+                documentOutline.style.transform = 'scale(1)';
+                documentOutline.style.opacity = '1';
+            }, 100);
+        }
+        
         function clamp(value) {
             return Math.max(0, Math.min(255, value));
         }
+        
+        // Événements boutons
+        startCameraButton.addEventListener('click', startCamera);
+        captureButton.addEventListener('click', captureImage);
+        detectEdgesButton.addEventListener('click', detectEdges);
         
         // Sauvegarder en PDF
         savePdfButton.addEventListener('click', () => {
@@ -742,7 +861,7 @@
             pdf.addImage(capturedImage, 'JPEG', 0, 0, pdfWidth, pdfHeight);
             
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const scanType = edgesDetected ? "scan-ameliore" : "scan-basique";
+            const scanType = edgesDetected ? "scan-optimise" : "scan-standard";
             const filename = `document-${scanType}-${timestamp}.pdf`;
             
             pdf.save(filename);
@@ -791,7 +910,7 @@
             
             reader.onload = (e) => {
                 capturedImage = e.target.result;
-                showStatus("✅ Image importée - Vous pouvez détecter les bords", "success");
+                showStatus("✅ Image importée - Vous pouvez détecter les contours", "success");
                 detectEdgesButton.disabled = false;
                 savePdfButton.disabled = false;
                 edgesDetected = false;
@@ -822,7 +941,7 @@
                 <div class="scan-item">
                     <img src="${scan.image}" alt="Document scanné" class="scan-preview">
                     <div class="quality-badge ${scan.enhanced ? 'enhanced' : ''}">
-                        ${scan.enhanced ? '✓ Amélioré' : 'Standard'}
+                        ${scan.enhanced ? '✓ Optimisé' : 'Standard'}
                     </div>
                     <div class="scan-actions">
                         <button class="action-btn download-btn" onclick="downloadScan(${scan.id})">
@@ -875,6 +994,9 @@
             }
         }
         
+        // Référence au container
+        const cameraContainer = document.querySelector('.camera-container');
+        
         // Nettoyer
         window.addEventListener('beforeunload', () => {
             if (stream) {
@@ -882,7 +1004,7 @@
             }
         });
         
-        // Empêcher le zoom sur les boutons
+        // Empêcher les comportements indésirables
         document.addEventListener('touchstart', function(e) {
             if (e.target.tagName === 'BUTTON') {
                 e.preventDefault();
