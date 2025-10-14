@@ -4,9 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#2575fc">
-    <title>Scanner de Documents - Détection Réelle OpenCV</title>
+    <title>Scanner - Détection & Ajustement Auto</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <!-- OpenCV.js - Version allégée pour mobile -->
     <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();"></script>
     <style>
         * {
@@ -90,11 +89,7 @@
             display: block;
         }
         
-        #canvas {
-            display: none;
-        }
-        
-        #processing-canvas {
+        #canvas, #processing-canvas, #result-canvas {
             display: none;
         }
         
@@ -134,12 +129,6 @@
             padding: 20px;
         }
         
-        .camera-placeholder i {
-            font-size: 3rem;
-            margin-bottom: 15px;
-            display: block;
-        }
-        
         .controls {
             display: flex;
             justify-content: center;
@@ -166,33 +155,23 @@
             justify-content: center;
             touch-action: manipulation;
             user-select: none;
-            -webkit-user-select: none;
-        }
-        
-        button:active {
-            transform: scale(0.95);
         }
         
         button:disabled {
             background: #cccccc;
             cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
             opacity: 0.6;
         }
         
         .capture-btn {
             background: linear-gradient(90deg, #ff5e7d, #ff9500);
-            box-shadow: 0 4px 8px rgba(255, 94, 125, 0.3);
             flex: 2;
             padding: 18px;
             font-size: 1.2rem;
-            min-height: 60px;
         }
         
         .detect-btn {
             background: linear-gradient(90deg, #00b09b, #96c93d);
-            box-shadow: 0 4px 8px rgba(0, 176, 155, 0.3);
         }
         
         .upload-section {
@@ -203,89 +182,12 @@
             text-align: center;
         }
         
-        .upload-btn {
-            background: linear-gradient(90deg, #8e2de2, #4a00e0);
-        }
-        
-        .scans-section {
-            margin-top: 20px;
-            flex: 1;
-        }
-        
-        h2 {
-            font-size: 1.3rem;
-            margin-bottom: 15px;
-            color: #2575fc;
-            text-align: center;
-        }
-        
-        .scans-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            gap: 12px;
-        }
-        
-        .scan-item {
-            background: white;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1);
-            transition: transform 0.2s ease;
-            position: relative;
-        }
-        
-        .scan-preview {
-            width: 100%;
-            height: 120px;
-            object-fit: cover;
-        }
-        
-        .scan-actions {
-            padding: 10px;
-            display: flex;
-            justify-content: space-between;
-        }
-        
-        .action-btn {
-            padding: 8px 12px;
-            font-size: 0.8rem;
-            min-width: auto;
-            flex: 1;
-            margin: 0 2px;
-        }
-        
-        .download-btn {
-            background: linear-gradient(90deg, #00b09b, #96c93d);
-        }
-        
-        .delete-btn {
-            background: linear-gradient(90deg, #ff5e7d, #ff2a6d);
-        }
-        
-        .instructions {
-            background: #f0f5ff;
-            padding: 15px;
-            border-radius: 12px;
-            margin-top: 20px;
-            font-size: 0.9rem;
-        }
-        
-        .troubleshooting {
-            background: #fff3cd;
-            border-left: 4px solid #ffc107;
-            padding: 12px;
-            margin: 15px 0;
-            border-radius: 0 8px 8px 0;
-            font-size: 0.85rem;
-        }
-        
         .status {
             text-align: center;
             padding: 12px;
             border-radius: 8px;
             margin: 15px 0;
             font-weight: 500;
-            font-size: 0.9rem;
         }
         
         .status.loading {
@@ -303,12 +205,23 @@
             color: #721c24;
         }
         
-        .no-scans {
-            text-align: center;
-            padding: 30px 15px;
-            color: #6c757d;
-            font-style: italic;
-            grid-column: 1 / -1;
+        .scans-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 12px;
+        }
+        
+        .scan-item {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .scan-preview {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
         }
         
         .edge-preview {
@@ -326,22 +239,17 @@
             border: 3px solid #00ff88;
             border-radius: 8px;
             box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3);
-            transition: all 0.5s ease;
+            transition: all 0.3s ease;
         }
 
-        .quality-badge {
+        .corner-handle {
             position: absolute;
-            top: 5px;
-            right: 5px;
-            color: white;
-            padding: 2px 6px;
-            border-radius: 10px;
-            font-size: 0.7rem;
-            background: #2575fc;
-        }
-        
-        .quality-badge.enhanced {
-            background: #00b09b;
+            width: 20px;
+            height: 20px;
+            background: #00ff88;
+            border-radius: 50%;
+            border: 2px solid white;
+            cursor: move;
         }
 
         .processing-overlay {
@@ -380,23 +288,19 @@
             border-radius: 8px;
             text-align: center;
             margin: 10px 0;
-            font-size: 0.9rem;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>
-                <span>📸</span>
-                Scanner OpenCV
-            </h1>
-            <p class="subtitle">Détection automatique des contours avec IA</p>
+            <h1>📸 Scanner - Détection Auto</h1>
+            <p class="subtitle">Bords détectés et ajustés automatiquement</p>
         </header>
         
         <div class="app-content">
             <div id="opencv-status" class="opencv-status">
-                ⏳ Chargement d'OpenCV.js (8MB)...
+                ⏳ Chargement OpenCV.js...
             </div>
             
             <div class="camera-section">
@@ -404,19 +308,23 @@
                     <video id="video" autoplay playsinline></video>
                     <canvas id="canvas"></canvas>
                     <canvas id="processing-canvas"></canvas>
+                    <canvas id="result-canvas"></canvas>
+                    
                     <div class="processing-overlay" id="processing-overlay">
                         <div class="spinner"></div>
-                        <div>Analyse IA en cours...</div>
+                        <div>Détection des bords en cours...</div>
                     </div>
+                    
                     <div class="camera-overlay">
                         <div class="document-guide"></div>
                         <div class="edge-preview" id="edge-preview">
                             <div class="document-outline" id="document-outline"></div>
                         </div>
                     </div>
+                    
                     <div class="camera-placeholder" id="camera-placeholder">
                         <div>📷</div>
-                        <p>OpenCV.js en cours de chargement</p>
+                        <p>Chargement en cours...</p>
                     </div>
                 </div>
                 
@@ -428,7 +336,7 @@
                         <span>⭕</span> Capturer
                     </button>
                     <button id="detect-edges" class="detect-btn" disabled>
-                        <span>🤖</span> Détection IA
+                        <span>🔍</span> Détecter Bords
                     </button>
                     <button id="save-pdf" disabled>
                         <span>💾</span> PDF
@@ -437,28 +345,20 @@
                 
                 <div class="upload-section">
                     <button id="upload-btn" disabled>
-                        <span>📁</span> Importer une image
+                        <span>📁</span> Importer
                     </button>
                     <input type="file" id="file-input" accept="image/*" style="display: none;">
                 </div>
                 
                 <div id="status" class="status"></div>
-                
-                <div class="troubleshooting">
-                    <h4>💡 Conseil pour la détection IA</h4>
-                    <ul style="margin-left: 15px; margin-top: 5px;">
-                        <li>Placez le document sur un fond contrasté</li>
-                        <li>Évitez les reflets et ombres</li>
-                        <li>Maintenez le téléphone bien droit</li>
-                        <li>La détection est plus précise avec de bons contrastes</li>
-                    </ul>
-                </div>
             </div>
             
             <div class="scans-section">
                 <h2>Documents Scannés</h2>
                 <div id="scans-container" class="scans-container">
-                    <div class="no-scans">Aucun document scanné</div>
+                    <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #666;">
+                        Aucun document scanné
+                    </div>
                 </div>
             </div>
         </div>
@@ -469,192 +369,257 @@
         let cv = null;
         let stream = null;
         let capturedImage = null;
+        let correctedImage = null;
         let scans = JSON.parse(localStorage.getItem('documentScans')) || [];
-        let isOpenCvReady = false;
+        let detectedCorners = null;
 
         // Éléments DOM
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const processingCanvas = document.getElementById('processing-canvas');
+        const resultCanvas = document.getElementById('result-canvas');
         const ctx = canvas.getContext('2d');
         const processingCtx = processingCanvas.getContext('2d');
-        const startCameraButton = document.getElementById('start-camera');
-        const captureButton = document.getElementById('capture');
-        const detectEdgesButton = document.getElementById('detect-edges');
-        const savePdfButton = document.getElementById('save-pdf');
-        const statusDiv = document.getElementById('status');
-        const scansContainer = document.getElementById('scans-container');
-        const cameraPlaceholder = document.getElementById('camera-placeholder');
-        const fileInput = document.getElementById('file-input');
-        const uploadButton = document.getElementById('upload-btn');
-        const edgePreview = document.getElementById('edge-preview');
-        const documentOutline = document.getElementById('document-outline');
-        const processingOverlay = document.getElementById('processing-overlay');
-        const opencvStatus = document.getElementById('opencv-status');
+        const resultCtx = resultCanvas.getContext('2d');
 
-        // OpenCV est prêt
+        // OpenCV ready
         function onOpenCvReady() {
             cv = window.cv;
-            isOpenCvReady = true;
-            
-            opencvStatus.innerHTML = '✅ OpenCV.js chargé !';
-            opencvStatus.style.background = '#d1edff';
-            
-            startCameraButton.disabled = false;
-            uploadButton.disabled = false;
-            cameraPlaceholder.innerHTML = '<div>📷</div><p>Appuyez sur "Activer la caméra"</p>';
-            
-            showStatus("OpenCV prêt - Détection IA activée", "success");
-            console.log('OpenCV version:', cv.version);
+            document.getElementById('opencv-status').innerHTML = '✅ OpenCV.js chargé !';
+            document.getElementById('start-camera').disabled = false;
+            document.getElementById('upload-btn').disabled = false;
+            document.getElementById('camera-placeholder').innerHTML = '<div>📷</div><p>Appuyez sur "Activer la caméra"</p>';
+            showStatus("OpenCV prêt - Détection active", "success");
         }
 
-        // VRAIE DÉTECTION DES CONTOURS AVEC OPENCV
-        function detectDocumentWithOpenCV() {
-            if (!capturedImage || !cv) return null;
+        // DÉTECTION ET AJUSTEMENT DES BORDS
+        function detectAndAdjustEdges() {
+            if (!capturedImage || !cv) return;
             
+            const processingOverlay = document.getElementById('processing-overlay');
             processingOverlay.style.display = 'flex';
-            showStatus("🔍 Analyse IA des contours...", "loading");
+            showStatus("🔍 Détection et ajustement des bords...", "loading");
             
-            // Utiliser setTimeout pour laisser l'interface se mettre à jour
             setTimeout(() => {
                 try {
                     const img = new Image();
                     img.onload = function() {
                         // Préparer les canvas
-                        canvas.width = img.width;
-                        canvas.height = img.height;
-                        processingCanvas.width = img.width;
-                        processingCanvas.height = img.height;
+                        const width = img.width;
+                        const height = img.height;
+                        canvas.width = processingCanvas.width = resultCanvas.width = width;
+                        canvas.height = processingCanvas.height = resultCanvas.height = height;
                         
                         ctx.drawImage(img, 0, 0);
                         processingCtx.drawImage(img, 0, 0);
                         
-                        // Convertir en matrice OpenCV
+                        // Détection OpenCV
                         let src = cv.imread(processingCanvas);
+                        let detected = detectDocumentCorners(src);
                         
-                        // 1. Conversion en niveaux de gris
-                        let gray = new cv.Mat();
-                        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-                        
-                        // 2. Flou gaussien pour réduire le bruit
-                        let blurred = new cv.Mat();
-                        cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
-                        
-                        // 3. Détection des bords avec Canny
-                        let edges = new cv.Mat();
-                        cv.Canny(blurred, edges, 50, 150);
-                        
-                        // 4. Trouver les contours
-                        let contours = new cv.MatVector();
-                        let hierarchy = new cv.Mat();
-                        cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-                        
-                        // 5. Trouver le plus grand contour rectangulaire
-                        let largestContour = null;
-                        let maxArea = 0;
-                        
-                        for (let i = 0; i < contours.size(); ++i) {
-                            let contour = contours.get(i);
-                            let area = cv.contourArea(contour);
+                        if (detected && detected.corners) {
+                            detectedCorners = detected.corners;
                             
-                            // Approximation du contour
-                            let epsilon = 0.02 * cv.arcLength(contour, true);
-                            let approx = new cv.Mat();
-                            cv.approxPolyDP(contour, approx, epsilon, true);
+                            // Afficher le contour détecté
+                            showDetectedCorners(detected.corners, width, height);
                             
-                            // Vérifier si c'est un quadrilatère
-                            if (area > maxArea && approx.rows == 4) {
-                                maxArea = area;
-                                largestContour = approx;
-                            } else {
-                                approx.delete();
-                            }
-                            contour.delete();
-                        }
-                        
-                        if (largestContour && maxArea > (img.width * img.height * 0.1)) {
-                            // Convertir les points du contour
-                            let points = [];
-                            for (let i = 0; i < 4; i++) {
-                                let point = largestContour.data32S.slice(i * 2, i * 2 + 2);
-                                points.push({ x: point[0], y: point[1] });
-                            }
+                            // Appliquer la correction perspective
+                            applyPerspectiveCorrection(src, detected.corners, width, height);
                             
-                            // Trier les points dans l'ordre: haut-gauche, haut-droit, bas-droit, bas-gauche
-                            points.sort((a, b) => a.y - b.y);
-                            
-                            let topPoints = points.slice(0, 2).sort((a, b) => a.x - b.x);
-                            let bottomPoints = points.slice(2, 4).sort((a, b) => a.x - b.x);
-                            
-                            const sortedPoints = [
-                                topPoints[0], // haut-gauche
-                                topPoints[1], // haut-droit
-                                bottomPoints[1], // bas-droit
-                                bottomPoints[0]  // bas-gauche
-                            ];
-                            
-                            // Afficher le résultat
-                            showDetectedDocument(sortedPoints);
-                            applyPerspectiveCorrection(sortedPoints);
-                            
-                            showStatus("✅ Document détecté avec précision !", "success");
+                            showStatus("✅ Bords détectés et ajustés !", "success");
                         } else {
                             showStatus("❌ Aucun document détecté", "error");
                         }
                         
-                        // Nettoyer la mémoire
-                        src.delete(); gray.delete(); blurred.delete(); 
-                        edges.delete(); contours.delete(); hierarchy.delete();
-                        if (largestContour) largestContour.delete();
-                        
+                        src.delete();
                         processingOverlay.style.display = 'none';
                     };
-                    
                     img.src = capturedImage;
                     
                 } catch (error) {
-                    console.error('Erreur OpenCV:', error);
-                    showStatus("❌ Erreur lors de l'analyse", "error");
-                    processingOverlay.style.display = 'none';
+                    console.error('Erreur détection:', error);
+                    showStatus("❌ Erreur lors de la détection", "error");
+                    document.getElementById('processing-overlay').style.display = 'none';
                 }
             }, 100);
         }
 
-        function showDetectedDocument(points) {
+        function detectDocumentCorners(src) {
+            try {
+                // 1. Conversion en niveaux de gris
+                let gray = new cv.Mat();
+                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+                
+                // 2. Flou gaussien
+                let blurred = new cv.Mat();
+                cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
+                
+                // 3. Détection des bords Canny
+                let edges = new cv.Mat();
+                cv.Canny(blurred, edges, 50, 150);
+                
+                // 4. Dilatation pour fermer les contours
+                let dilated = new cv.Mat();
+                let kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+                cv.dilate(edges, dilated, kernel);
+                
+                // 5. Trouver les contours
+                let contours = new cv.MatVector();
+                let hierarchy = new cv.Mat();
+                cv.findContours(dilated, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+                
+                // 6. Chercher le meilleur contour de document
+                let bestContour = null;
+                let bestScore = 0;
+                
+                for (let i = 0; i < contours.size(); ++i) {
+                    let contour = contours.get(i);
+                    let area = cv.contourArea(contour);
+                    
+                    // Ignorer les trop petits contours
+                    if (area < (src.rows * src.cols * 0.1)) {
+                        contour.delete();
+                        continue;
+                    }
+                    
+                    // Approximation polygonale
+                    let epsilon = 0.02 * cv.arcLength(contour, true);
+                    let approx = new cv.Mat();
+                    cv.approxPolyDP(contour, approx, epsilon, true);
+                    
+                    // Score basé sur l'aire et la régularité
+                    let score = area;
+                    
+                    // Bonus pour les quadrilatères
+                    if (approx.rows === 4) {
+                        score *= 1.5;
+                        
+                        // Vérifier la convexité
+                        let hull = new cv.Mat();
+                        cv.convexHull(approx, hull);
+                        if (hull.rows === 4) {
+                            score *= 1.2;
+                        }
+                        hull.delete();
+                    }
+                    
+                    if (score > bestScore) {
+                        bestScore = score;
+                        if (bestContour) bestContour.delete();
+                        bestContour = approx;
+                    } else {
+                        approx.delete();
+                    }
+                    
+                    contour.delete();
+                }
+                
+                let result = null;
+                if (bestContour && bestContour.rows === 4) {
+                    // Extraire les coins
+                    let corners = [];
+                    for (let i = 0; i < 4; i++) {
+                        let x = bestContour.data32S[i * 2];
+                        let y = bestContour.data32S[i * 2 + 1];
+                        corners.push({ x: x, y: y });
+                    }
+                    
+                    // Trier les coins : haut-gauche, haut-droit, bas-droit, bas-gauche
+                    corners.sort((a, b) => a.y - b.y);
+                    let top = corners.slice(0, 2).sort((a, b) => a.x - b.x);
+                    let bottom = corners.slice(2, 4).sort((a, b) => a.x - b.x);
+                    
+                    result = {
+                        corners: [top[0], top[1], bottom[1], bottom[0]]
+                    };
+                }
+                
+                // Nettoyer la mémoire
+                gray.delete(); blurred.delete(); edges.delete(); 
+                dilated.delete(); kernel.delete(); contours.delete(); 
+                hierarchy.delete();
+                if (bestContour) bestContour.delete();
+                
+                return result;
+                
+            } catch (error) {
+                console.error('Erreur détection coins:', error);
+                return null;
+            }
+        }
+
+        function showDetectedCorners(corners, imgWidth, imgHeight) {
             const container = document.querySelector('.camera-container');
             const containerRect = container.getBoundingClientRect();
             
+            const scaleX = containerRect.width / imgWidth;
+            const scaleY = containerRect.height / imgHeight;
+            
             // Calculer le rectangle englobant
-            const minX = Math.min(...points.map(p => p.x));
-            const minY = Math.min(...points.map(p => p.y));
-            const maxX = Math.max(...points.map(p => p.x));
-            const maxY = Math.max(...points.map(p => p.y));
+            const minX = Math.min(...corners.map(p => p.x));
+            const maxX = Math.max(...corners.map(p => p.x));
+            const minY = Math.min(...corners.map(p => p.y));
+            const maxY = Math.max(...corners.map(p => p.y));
             
-            const scaleX = containerRect.width / canvas.width;
-            const scaleY = containerRect.height / canvas.height;
+            const outline = document.getElementById('document-outline');
+            outline.style.left = (minX * scaleX) + 'px';
+            outline.style.top = (minY * scaleY) + 'px';
+            outline.style.width = ((maxX - minX) * scaleX) + 'px';
+            outline.style.height = ((maxY - minY) * scaleY) + 'px';
             
-            documentOutline.style.left = (minX * scaleX) + 'px';
-            documentOutline.style.top = (minY * scaleY) + 'px';
-            documentOutline.style.width = ((maxX - minX) * scaleX) + 'px';
-            documentOutline.style.height = ((maxY - minY) * scaleY) + 'px';
-            
-            edgePreview.style.display = 'block';
+            document.getElementById('edge-preview').style.display = 'block';
             
             // Animation
-            documentOutline.style.transform = 'scale(0.9)';
-            documentOutline.style.opacity = '0';
-            
+            outline.style.transform = 'scale(0.95)';
+            outline.style.opacity = '0';
             setTimeout(() => {
-                documentOutline.style.transition = 'all 0.4s ease';
-                documentOutline.style.transform = 'scale(1)';
-                documentOutline.style.opacity = '1';
+                outline.style.transition = 'all 0.4s ease';
+                outline.style.transform = 'scale(1)';
+                outline.style.opacity = '1';
             }, 100);
         }
 
-        function applyPerspectiveCorrection(points) {
-            // Ici on pourrait appliquer une correction de perspective
-            // pour redresser le document, mais c'est plus complexe
-            console.log("Points du document détecté:", points);
+        function applyPerspectiveCorrection(src, corners, originalWidth, originalHeight) {
+            try {
+                // Points source (coins détectés)
+                let srcPoints = cv.matFromArray(4, 1, cv.CV_32FC2, [
+                    corners[0].x, corners[0].y,
+                    corners[1].x, corners[1].y,
+                    corners[2].x, corners[2].y,
+                    corners[3].x, corners[3].y
+                ]);
+                
+                // Points destination (rectangle droit)
+                const outputWidth = originalWidth;
+                const outputHeight = originalHeight;
+                
+                let dstPoints = cv.matFromArray(4, 1, cv.CV_32FC2, [
+                    0, 0,
+                    outputWidth, 0,
+                    outputWidth, outputHeight,
+                    0, outputHeight
+                ]);
+                
+                // Calculer la matrice de transformation perspective
+                let transform = cv.getPerspectiveTransform(srcPoints, dstPoints);
+                
+                // Appliquer la transformation
+                let dst = new cv.Mat();
+                cv.warpPerspective(src, dst, transform, new cv.Size(outputWidth, outputHeight));
+                
+                // Afficher le résultat
+                cv.imshow(resultCanvas, dst);
+                correctedImage = resultCanvas.toDataURL('image/jpeg', 0.9);
+                
+                // Mettre à jour l'image capturée avec la version corrigée
+                capturedImage = correctedImage;
+                
+                // Nettoyer
+                srcPoints.delete(); dstPoints.delete(); transform.delete(); dst.delete();
+                
+            } catch (error) {
+                console.error('Erreur correction perspective:', error);
+            }
         }
 
         // Gestion des événements
@@ -664,92 +629,69 @@
         });
 
         function setupEventListeners() {
-            startCameraButton.addEventListener('click', startCamera);
-            captureButton.addEventListener('click', captureImage);
-            detectEdgesButton.addEventListener('click', detectDocumentWithOpenCV);
-            savePdfButton.addEventListener('click', saveAsPDF);
-            uploadButton.addEventListener('click', () => fileInput.click());
-            fileInput.addEventListener('change', handleFileUpload);
+            document.getElementById('start-camera').addEventListener('click', startCamera);
+            document.getElementById('capture').addEventListener('click', captureImage);
+            document.getElementById('detect-edges').addEventListener('click', detectAndAdjustEdges);
+            document.getElementById('save-pdf').addEventListener('click', saveAsPDF);
+            document.getElementById('upload-btn').addEventListener('click', () => document.getElementById('file-input').click());
+            document.getElementById('file-input').addEventListener('change', handleFileUpload);
         }
 
         async function startCamera() {
             try {
-                showStatus("Activation de la caméra...", "loading");
+                showStatus("Activation caméra...", "loading");
                 
-                if (stream) {
-                    stream.getTracks().forEach(track => track.stop());
-                }
-                
-                const constraints = {
-                    video: { 
-                        facingMode: 'environment',
-                        width: { ideal: 1920 },
-                        height: { ideal: 1080 }
-                    },
-                    audio: false
-                };
-                
-                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
                 video.srcObject = stream;
-                cameraPlaceholder.style.display = 'none';
-                
+                document.getElementById('camera-placeholder').style.display = 'none';
+                document.getElementById('start-camera').disabled = true;
+                document.getElementById('capture').disabled = false;
                 showStatus("✅ Caméra activée", "success");
-                startCameraButton.disabled = true;
-                captureButton.disabled = false;
                 
             } catch (error) {
-                showStatus("❌ Erreur caméra: " + error.message, "error");
+                showStatus("❌ Erreur caméra", "error");
             }
         }
 
         function captureImage() {
-            try {
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                ctx.drawImage(video, 0, 0);
-                capturedImage = canvas.toDataURL('image/jpeg', 0.9);
-                
-                showStatus("✅ Image capturée", "success");
-                detectEdgesButton.disabled = false;
-                savePdfButton.disabled = false;
-                edgePreview.style.display = 'none';
-                
-            } catch (error) {
-                showStatus("❌ Erreur capture", "error");
-            }
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+            capturedImage = canvas.toDataURL('image/jpeg', 0.9);
+            document.getElementById('detect-edges').disabled = false;
+            document.getElementById('save-pdf').disabled = false;
+            document.getElementById('edge-preview').style.display = 'none';
+            showStatus("✅ Image capturée", "success");
         }
 
         function saveAsPDF() {
             if (!capturedImage) return;
             
-            showStatus("📄 Génération du PDF...", "loading");
+            showStatus("📄 Génération PDF...", "loading");
             
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF();
-            
             const imgProps = pdf.getImageProperties(capturedImage);
             const pdfWidth = pdf.internal.pageSize.getWidth();
             const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
             
             pdf.addImage(capturedImage, 'JPEG', 0, 0, pdfWidth, pdfHeight);
             
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const filename = `document-${timestamp}.pdf`;
-            
+            const filename = `document-${new Date().toISOString().replace(/[:.]/g, '-')}.pdf`;
             pdf.save(filename);
             
-            const scan = {
+            scans.unshift({
                 id: Date.now(),
                 image: capturedImage,
                 filename: filename,
                 date: new Date().toLocaleString('fr-FR')
-            };
+            });
             
-            scans.unshift(scan);
             localStorage.setItem('documentScans', JSON.stringify(scans));
-            
-            showStatus("✅ PDF généré", "success");
             updateScansDisplay();
+            showStatus("✅ PDF généré", "success");
         }
 
         function handleFileUpload(event) {
@@ -759,42 +701,29 @@
             const reader = new FileReader();
             reader.onload = function(e) {
                 capturedImage = e.target.result;
+                document.getElementById('detect-edges').disabled = false;
+                document.getElementById('save-pdf').disabled = false;
+                document.getElementById('edge-preview').style.display = 'none';
                 showStatus("✅ Image importée", "success");
-                detectEdgesButton.disabled = false;
-                savePdfButton.disabled = false;
-                edgePreview.style.display = 'none';
-                
-                const img = new Image();
-                img.onload = function() {
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    ctx.drawImage(img, 0, 0);
-                };
-                img.src = capturedImage;
             };
             reader.readAsDataURL(file);
         }
 
         function updateScansDisplay() {
+            const container = document.getElementById('scans-container');
             if (scans.length === 0) {
-                scansContainer.innerHTML = '<div class="no-scans">Aucun document scanné</div>';
+                container.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#666">Aucun document</div>';
                 return;
             }
             
-            scansContainer.innerHTML = scans.map(scan => `
+            container.innerHTML = scans.map(scan => `
                 <div class="scan-item">
-                    <img src="${scan.image}" alt="Document scanné" class="scan-preview">
-                    <div class="scan-actions">
-                        <button class="action-btn download-btn" onclick="downloadScan(${scan.id})">
-                            <span>⬇️</span>
-                        </button>
-                        <button class="action-btn delete-btn" onclick="deleteScan(${scan.id})">
-                            <span>🗑️</span>
-                        </button>
+                    <img src="${scan.image}" class="scan-preview">
+                    <div style="padding:10px;display:flex;gap:5px;">
+                        <button class="action-btn download-btn" onclick="downloadScan(${scan.id})" style="flex:1;padding:8px;background:#00b09b;color:white;border:none;border-radius:6px;">⬇️</button>
+                        <button class="action-btn delete-btn" onclick="deleteScan(${scan.id})" style="flex:1;padding:8px;background:#ff5e7d;color:white;border:none;border-radius:6px;">🗑️</button>
                     </div>
-                    <div style="padding: 8px; font-size: 0.7rem; color: #666; text-align: center;">
-                        ${scan.date.split(' ')[0]}
-                    </div>
+                    <div style="padding:8px;font-size:0.7rem;color:#666;text-align:center">${scan.date.split(' ')[0]}</div>
                 </div>
             `).join('');
         }
@@ -821,9 +750,15 @@
         }
 
         function showStatus(message, type = '') {
+            const statusDiv = document.getElementById('status');
             statusDiv.textContent = message;
             statusDiv.className = `status ${type}`;
         }
+
+        // Nettoyage
+        window.addEventListener('beforeunload', () => {
+            if (stream) stream.getTracks().forEach(track => track.stop());
+        });
     </script>
 </body>
 </html>
