@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ScanDocs - Scanner PDF</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: https:; camera 'self';">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://docs.opencv.org/4.8.0/opencv.js" async></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/idb@7/build/umd.js"></script>
@@ -421,6 +421,21 @@
             margin: 1rem 0;
         }
 
+        /* Status Badge */
+        .status-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: var(--success);
+            color: white;
+            margin-left: 0.5rem;
+        }
+
+        .status-badge.warning {
+            background: var(--warning);
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .scanner-controls {
@@ -459,6 +474,7 @@
                 <div class="logo">
                     <i class="fas fa-scanner"></i>
                     <span>ScanDocs</span>
+                    <span id="opencvStatus" class="status-badge warning">Chargement...</span>
                 </div>
                 <button class="btn btn-primary" onclick="showScanModal()">
                     <i class="fas fa-camera"></i>
@@ -479,15 +495,15 @@
                     </div>
                 </div>
                 <div class="scanner-controls">
-                    <button class="btn btn-primary" onclick="captureImage()" id="captureBtn">
+                    <button class="btn btn-primary" onclick="captureImage()" id="captureBtn" disabled>
                         <i class="fas fa-camera"></i>
                         Capturer
                     </button>
-                    <button class="btn btn-secondary" onclick="toggleCamera()">
+                    <button class="btn btn-secondary" onclick="toggleCamera()" id="toggleBtn" disabled>
                         <i class="fas fa-sync-alt"></i>
                         Changer Caméra
                     </button>
-                    <button class="btn btn-success" onclick="processDocument()" id="processBtn">
+                    <button class="btn btn-success" onclick="processDocument()" id="processBtn" disabled>
                         <i class="fas fa-magic"></i>
                         Traitement Auto
                     </button>
@@ -515,7 +531,11 @@
                 </div>
 
                 <div class="documents-grid" id="documentsGrid">
-                    <!-- Documents will be dynamically added here -->
+                    <div class="empty-state">
+                        <i class="fas fa-folder-open"></i>
+                        <p>Aucun document scanné</p>
+                        <p>Commencez par capturer votre premier document</p>
+                    </div>
                 </div>
             </section>
         </main>
@@ -590,6 +610,66 @@
     </div>
 
     <script>
+        // Gestionnaire de chargement OpenCV
+        function loadOpenCV() {
+            return new Promise((resolve) => {
+                if (typeof cv !== 'undefined' && cv.getBuildInformation) {
+                    console.log('OpenCV déjà chargé');
+                    updateOpenCVStatus('success', 'OpenCV Prêt');
+                    resolve(true);
+                    return;
+                }
+                
+                console.log('Chargement OpenCV...');
+                const script = document.createElement('script');
+                script.src = 'https://docs.opencv.org/4.8.0/opencv.js';
+                script.async = true;
+                
+                script.onload = () => {
+                    console.log('Script OpenCV chargé');
+                    if (cv.getBuildInformation) {
+                        console.log('OpenCV prêt immédiatement');
+                        updateOpenCVStatus('success', 'OpenCV Prêt');
+                        resolve(true);
+                    } else {
+                        cv['onRuntimeInitialized'] = () => {
+                            console.log('OpenCV initialisé');
+                            updateOpenCVStatus('success', 'OpenCV Prêt');
+                            resolve(true);
+                        };
+                        
+                        // Timeout de sécurité
+                        setTimeout(() => {
+                            if (typeof cv === 'undefined' || !cv.getBuildInformation) {
+                                console.warn('Timeout OpenCV');
+                                updateOpenCVStatus('warning', 'Mode Basique');
+                                resolve(false);
+                            }
+                        }, 10000);
+                    }
+                };
+                
+                script.onerror = () => {
+                    console.warn('Échec chargement OpenCV');
+                    updateOpenCVStatus('warning', 'Mode Basique');
+                    resolve(false);
+                };
+                
+                document.head.appendChild(script);
+            });
+        }
+
+        function updateOpenCVStatus(type, message) {
+            const badge = document.getElementById('opencvStatus');
+            badge.textContent = message;
+            badge.className = 'status-badge';
+            if (type === 'success') {
+                badge.style.background = 'var(--success)';
+            } else if (type === 'warning') {
+                badge.style.background = 'var(--warning)';
+            }
+        }
+
         // État de l'application
         const appState = {
             currentStream: null,
@@ -599,36 +679,59 @@
             currentDocument: null,
             selectedFolder: 'Général',
             documentType: 'document',
-            db: null
+            db: null,
+            openCvReady: false
         };
 
         // Initialisation IndexedDB
         async function initDB() {
-            appState.db = await idb.openDB('ScanDocsDB', 2, {
-                upgrade(db, oldVersion, newVersion, transaction) {
-                    // Version 1: documents store
-                    if (!db.objectStoreNames.contains('documents')) {
-                        const store = db.createObjectStore('documents', { keyPath: 'id' });
-                        store.createIndex('folder', 'folder');
-                        store.createIndex('date', 'date');
+            try {
+                appState.db = await idb.openDB('ScanDocsDB', 2, {
+                    upgrade(db, oldVersion, newVersion, transaction) {
+                        if (!db.objectStoreNames.contains('documents')) {
+                            const store = db.createObjectStore('documents', { keyPath: 'id' });
+                            store.createIndex('folder', 'folder');
+                            store.createIndex('date', 'date');
+                        }
+                        
+                        if (!db.objectStoreNames.contains('folders')) {
+                            db.createObjectStore('folders', { keyPath: 'name' });
+                        }
+                        
+                        if (!db.objectStoreNames.contains('backups')) {
+                            db.createObjectStore('backups', { keyPath: 'id', autoIncrement: true });
+                        }
                     }
-                    
-                    // Version 2: folders store
-                    if (!db.objectStoreNames.contains('folders')) {
-                        db.createObjectStore('folders', { keyPath: 'name' });
-                    }
-                    
-                    // Version 2: backup store
-                    if (!db.objectStoreNames.contains('backups')) {
-                        db.createObjectStore('backups', { keyPath: 'id', autoIncrement: true });
-                    }
-                }
-            });
-            
-            // Charger les dossiers
-            await loadFolders();
-            // Charger les documents
-            await loadDocuments();
+                });
+                
+                await loadFolders();
+                await loadDocuments();
+            } catch (error) {
+                console.error('Erreur initialisation DB:', error);
+                // Fallback localStorage
+                await loadFromLocalStorage();
+            }
+        }
+
+        // Fallback localStorage
+        async function loadFromLocalStorage() {
+            const saved = localStorage.getItem('scandocs_data');
+            if (saved) {
+                const data = JSON.parse(saved);
+                appState.documents = data.documents || [];
+                appState.folders = data.folders || ['Général'];
+            }
+            renderDocuments();
+            renderFolders();
+            populateFolderSelect();
+        }
+
+        async function saveToLocalStorage() {
+            const data = {
+                documents: appState.documents,
+                folders: appState.folders
+            };
+            localStorage.setItem('scandocs_data', JSON.stringify(data));
         }
 
         // Gestion des dossiers
@@ -638,7 +741,6 @@
                 if (folders.length > 0) {
                     appState.folders = folders.map(f => f.name);
                 } else {
-                    // Initialiser avec les dossiers par défaut
                     const tx = appState.db.transaction('folders', 'readwrite');
                     for (const folder of appState.folders) {
                         await tx.store.add({ name: folder });
@@ -654,12 +756,15 @@
 
         async function saveFolders() {
             try {
-                const tx = appState.db.transaction('folders', 'readwrite');
-                await tx.store.clear();
-                for (const folder of appState.folders) {
-                    await tx.store.add({ name: folder });
+                if (appState.db) {
+                    const tx = appState.db.transaction('folders', 'readwrite');
+                    await tx.store.clear();
+                    for (const folder of appState.folders) {
+                        await tx.store.add({ name: folder });
+                    }
+                    await tx.done;
                 }
-                await tx.done;
+                await saveToLocalStorage();
             } catch (error) {
                 console.error('Erreur sauvegarde dossiers:', error);
             }
@@ -668,7 +773,10 @@
         // Gestion des documents
         async function saveDocument(document) {
             try {
-                await appState.db.put('documents', document);
+                if (appState.db) {
+                    await appState.db.put('documents', document);
+                }
+                await saveToLocalStorage();
             } catch (error) {
                 console.error('Erreur sauvegarde document:', error);
             }
@@ -676,17 +784,24 @@
 
         async function loadDocuments() {
             try {
-                appState.documents = await appState.db.getAll('documents');
+                if (appState.db) {
+                    appState.documents = await appState.db.getAll('documents');
                 renderDocuments();
+                return;
+                }
             } catch (error) {
                 console.error('Erreur chargement documents:', error);
             }
+            await loadFromLocalStorage();
         }
 
         async function deleteDocument(id) {
             try {
-                await appState.db.delete('documents', id);
+                if (appState.db) {
+                    await appState.db.delete('documents', id);
+                }
                 appState.documents = appState.documents.filter(doc => doc.id !== id);
+                await saveToLocalStorage();
                 renderDocuments();
             } catch (error) {
                 console.error('Erreur suppression document:', error);
@@ -695,19 +810,11 @@
 
         // Initialisation
         document.addEventListener('DOMContentLoaded', async function() {
+            const openCvLoaded = await loadOpenCV();
+            appState.openCvReady = openCvLoaded;
             await initDB();
-            initEventListeners();
+            console.log('Application initialisée - OpenCV:', appState.openCvReady);
         });
-
-        function initEventListeners() {
-            // Filtres de type de document
-            document.querySelectorAll('.filter-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                    this.classList.add('active');
-                });
-            });
-        }
 
         // Gestion de la caméra
         async function initCamera() {
@@ -727,7 +834,9 @@
                 
                 // Activer les boutons
                 document.getElementById('captureBtn').disabled = false;
+                document.getElementById('toggleBtn').disabled = false;
                 document.getElementById('processBtn').disabled = false;
+                
             } catch (error) {
                 console.error('Erreur caméra:', error);
                 alert('Impossible d\'accéder à la caméra. Vérifiez les permissions.');
@@ -748,37 +857,87 @@
             initCamera();
         }
 
-        // Capture d'image avec OpenCV
+        // Capture d'image - VERSION CORRIGÉE
         async function captureImage() {
             const video = document.getElementById('cameraPreview');
+            
+            if (!video.srcObject) {
+                alert('Veuillez d\'abord démarrer la caméra');
+                return;
+            }
+            
+            // Attendre que la vidéo soit prête
+            if (video.readyState !== 4) {
+                showProcessing('Préparation de la caméra...');
+                await new Promise(resolve => {
+                    video.addEventListener('loadeddata', resolve, { once: true });
+                });
+                hideProcessing();
+            }
+            
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0);
-            
-            showProcessing('Capture en cours...');
             
             try {
-                const blob = await new Promise(resolve => {
+                ctx.drawImage(video, 0, 0);
+                showProcessing('Capture en cours...');
+                
+                const blob = await new Promise((resolve) => {
                     canvas.toBlob(resolve, 'image/jpeg', 0.9);
                 });
                 
-                await processCapturedImage(blob);
+                if (appState.openCvReady) {
+                    await processCapturedImage(blob);
+                } else {
+                    await fallbackCapture(blob);
+                }
+                
             } catch (error) {
                 console.error('Erreur capture:', error);
-                alert('Erreur lors de la capture');
+                alert('Erreur lors de la capture. Essayez à nouveau.');
             } finally {
                 hideProcessing();
             }
         }
 
+        // Fallback sans OpenCV
+        async function fallbackCapture(blob) {
+            try {
+                const document = {
+                    id: Date.now(),
+                    name: document.getElementById('documentName').value || `Document_${new Date().toLocaleDateString('fr-FR')}`,
+                    folder: document.getElementById('documentFolder').value,
+                    type: appState.documentType,
+                    image: URL.createObjectURL(blob),
+                    date: new Date().toISOString(),
+                    imageData: await blobToBase64(blob),
+                    pages: [await blobToBase64(blob)]
+                };
+                
+                appState.documents.push(document);
+                await saveDocument(document);
+                renderDocuments();
+                alert('Document capturé avec succès!');
+                
+            } catch (error) {
+                console.error('Erreur fallback:', error);
+                alert('Erreur lors de la sauvegarde du document.');
+            }
+        }
+
+        // Traitement avec OpenCV
         async function processCapturedImage(blob) {
-            showProcessing('Traitement de l\'image...');
+            showProcessing('Traitement OpenCV...');
             
             try {
-                // Convertir blob en ImageData pour OpenCV
+                // Vérification finale OpenCV
+                if (typeof cv === 'undefined' || !cv.Mat) {
+                    throw new Error('OpenCV non disponible');
+                }
+                
                 const img = await createImageBitmap(blob);
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
@@ -787,12 +946,6 @@
                 ctx.drawImage(img, 0, 0);
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 
-                // Vérifier si OpenCV est chargé
-                if (typeof cv === 'undefined') {
-                    throw new Error('OpenCV pas encore chargé');
-                }
-                
-                // Traitement avec OpenCV
                 const src = cv.matFromImageData(imageData);
                 const dst = new cv.Mat();
                 const gray = new cv.Mat();
@@ -808,31 +961,29 @@
                 const hierarchy = new cv.Mat();
                 cv.findContours(dst, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
                 
-                // Trouver le plus grand contour (document)
-                let maxArea = 0;
-                let maxContour = null;
-                
-                for (let i = 0; i < contours.size(); ++i) {
-                    const contour = contours.get(i);
-                    const area = cv.contourArea(contour);
-                    if (area > maxArea) {
-                        maxArea = area;
-                        maxContour = contour;
-                    }
-                }
-                
                 let processedBlob = blob;
                 
-                if (maxContour && maxArea > 10000) {
-                    // Correction de perspective
-                    const rect = cv.minAreaRect(maxContour);
-                    const corners = cv.RotatedRect.points(rect);
+                // Si on trouve un contour significatif, appliquer la correction
+                if (contours.size() > 0) {
+                    let maxArea = 0;
+                    let maxContour = null;
                     
-                    // Appliquer la transformation de perspective
-                    const result = applyPerspectiveCorrection(src, corners);
-                    processedBlob = await matToBlob(result);
+                    for (let i = 0; i < contours.size(); ++i) {
+                        const contour = contours.get(i);
+                        const area = cv.contourArea(contour);
+                        if (area > maxArea && area > 10000) {
+                            maxArea = area;
+                            maxContour = contour;
+                        }
+                    }
                     
-                    result.delete();
+                    if (maxContour) {
+                        const rect = cv.minAreaRect(maxContour);
+                        const corners = cv.RotatedRect.points(rect);
+                        const result = applyPerspectiveCorrection(src, corners);
+                        processedBlob = await matToBlob(result);
+                        result.delete();
+                    }
                 }
                 
                 // Nettoyer la mémoire
@@ -842,7 +993,7 @@
                 contours.delete();
                 hierarchy.delete();
                 
-                // Sauvegarder le document
+                // Sauvegarder le document traité
                 const document = {
                     id: Date.now(),
                     name: document.getElementById('documentName').value || `Document_${new Date().toLocaleDateString('fr-FR')}`,
@@ -858,34 +1009,17 @@
                 await saveDocument(document);
                 renderDocuments();
                 
-                alert('Document capturé et traité avec succès!');
+                alert('Document traité avec OpenCV!');
                 
             } catch (error) {
                 console.error('Erreur traitement OpenCV:', error);
-                // Fallback: sauvegarder sans traitement
-                const document = {
-                    id: Date.now(),
-                    name: document.getElementById('documentName').value || `Document_${new Date().toLocaleDateString('fr-FR')}`,
-                    folder: document.getElementById('documentFolder').value,
-                    type: appState.documentType,
-                    image: URL.createObjectURL(blob),
-                    date: new Date().toISOString(),
-                    imageData: await blobToBase64(blob),
-                    pages: [await blobToBase64(blob)]
-                };
-                
-                appState.documents.push(document);
-                await saveDocument(document);
-                renderDocuments();
-                alert('Document capturé (traitement basique appliqué)');
-            } finally {
-                hideProcessing();
+                // Retour au mode basique
+                await fallbackCapture(blob);
             }
         }
 
         // Correction de perspective
         function applyPerspectiveCorrection(src, corners) {
-            // Trier les coins
             corners.sort((a, b) => a.y - b.y);
             const top = corners.slice(0, 2).sort((a, b) => a.x - b.x);
             const bottom = corners.slice(2, 4).sort((a, b) => a.x - b.x);
@@ -934,21 +1068,26 @@
             });
         }
 
-        // Traitement automatique avec filtres
+        // Traitement automatique
         async function processDocument() {
             if (appState.documents.length === 0) {
                 alert('Capturez d\'abord un document');
                 return;
             }
             
-            showProcessing('Application des filtres...');
+            if (!appState.openCvReady) {
+                alert('OpenCV non disponible pour le traitement automatique');
+                return;
+            }
+            
+            showProcessing('Traitement automatique...');
             
             try {
                 const lastDoc = appState.documents[appState.documents.length - 1];
                 const response = await fetch(lastDoc.image);
                 const blob = await response.blob();
-                const img = await createImageBitmap(blob);
                 
+                const img = await createImageBitmap(blob);
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
                 canvas.width = img.width;
@@ -959,19 +1098,15 @@
                 const src = cv.matFromImageData(imageData);
                 const dst = new cv.Mat();
                 
-                // Appliquer différents filtres selon le type de document
                 switch(appState.documentType) {
                     case 'document':
-                        // Amélioration du contraste pour les documents
                         cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
                         cv.equalizeHist(dst, dst);
                         break;
                     case 'photo':
-                        // Filtre doux pour les photos
                         cv.GaussianBlur(src, dst, new cv.Size(3, 3), 0);
                         break;
                     case 'receipt':
-                        // Renforcement des bords pour les reçus
                         cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
                         cv.adaptiveThreshold(dst, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2);
                         break;
@@ -982,7 +1117,6 @@
                 const processedBlob = await matToBlob(dst);
                 const processedUrl = URL.createObjectURL(processedBlob);
                 
-                // Mettre à jour le document
                 lastDoc.image = processedUrl;
                 lastDoc.imageData = await blobToBase64(processedBlob);
                 await saveDocument(lastDoc);
@@ -991,7 +1125,7 @@
                 src.delete();
                 dst.delete();
                 
-                alert('Traitement automatique appliqué avec succès!');
+                alert('Traitement automatique appliqué!');
             } catch (error) {
                 console.error('Erreur traitement auto:', error);
                 alert('Erreur lors du traitement automatique');
@@ -1000,19 +1134,16 @@
             }
         }
 
-        // Export PDF avec PDF-Lib
+        // Export PDF
         async function exportToPDF(document) {
-            showProcessing('Génération du PDF...');
+            showProcessing('Génération PDF...');
             
             try {
                 const { PDFDocument, rgb } = PDFLib;
                 const pdfDoc = await PDFDocument.create();
                 
-                // Ajouter une page pour chaque image
                 for (const pageData of document.pages) {
-                    const page = pdfDoc.addPage([595, 842]); // A4
-                    
-                    // Convertir base64 en image
+                    const page = pdfDoc.addPage([595, 842]);
                     const imageBytes = base64ToUint8Array(pageData);
                     let image;
                     
@@ -1022,7 +1153,6 @@
                         image = await pdfDoc.embedPng(imageBytes);
                     }
                     
-                    // Ajuster l'image à la page
                     const dims = image.scaleToFit(595, 842);
                     page.drawImage(image, {
                         x: (595 - dims.width) / 2,
@@ -1036,7 +1166,6 @@
                 const blob = new Blob([pdfBytes], { type: 'application/pdf' });
                 const url = URL.createObjectURL(blob);
                 
-                // Téléchargement automatique
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = `${document.name}.pdf`;
@@ -1093,7 +1222,7 @@
                         <div class="document-name">${doc.name}</div>
                         <div class="document-date">${new Date(doc.date).toLocaleDateString('fr-FR')}</div>
                         <div class="document-actions">
-                            <button class="action-btn btn-primary" onclick="event.stopPropagation(); exportToPDF(${doc.id})">
+                            <button class="action-btn btn-primary" onclick="event.stopPropagation(); exportToPDF(${JSON.stringify(doc).replace(/"/g, '&quot;')})">
                                 <i class="fas fa-file-pdf"></i> PDF
                             </button>
                             <button class="action-btn btn-danger" onclick="event.stopPropagation(); deleteDocument(${doc.id})">
@@ -1111,7 +1240,6 @@
             const container = document.getElementById('foldersContainer');
             container.innerHTML = '';
 
-            // Ajouter "Tous" en premier
             const allCard = document.createElement('div');
             allCard.className = `folder-card ${appState.selectedFolder === 'Tous' ? 'active' : ''}`;
             allCard.innerHTML = `
@@ -1156,6 +1284,12 @@
 
         function setDocumentType(type) {
             appState.documentType = type;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.dataset.filter === type) {
+                    btn.classList.add('active');
+                }
+            });
         }
 
         // Modals
@@ -1201,7 +1335,7 @@
 
         // Sauvegarde et restauration
         async function exportBackup() {
-            showProcessing('Création de la sauvegarde...');
+            showProcessing('Création sauvegarde...');
             
             try {
                 const backup = {
@@ -1221,8 +1355,9 @@
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
                 
-                // Sauvegarder dans IndexedDB
-                await appState.db.add('backups', backup);
+                if (appState.db) {
+                    await appState.db.add('backups', backup);
+                }
                 
             } catch (error) {
                 console.error('Erreur sauvegarde:', error);
@@ -1259,15 +1394,6 @@
                 .then(registration => console.log('SW registered'))
                 .catch(error => console.log('SW registration failed'));
         }
-
-        // Gestionnaire d'erreurs OpenCV
-        window.addEventListener('load', function() {
-            if (typeof cv !== 'undefined') {
-                cv['onRuntimeInitialized'] = () => {
-                    console.log('OpenCV prêt');
-                };
-            }
-        });
     </script>
 </body>
 </html>
