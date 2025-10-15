@@ -551,11 +551,11 @@
             <div class="modal-body">
                 <div class="form-group">
                     <label class="form-label">Nom du document</label>
-                    <input type="text" class="form-input" id="documentName" placeholder="Facture_2024...">
+                    <input type="text" class="form-input" id="documentNameInput" placeholder="Facture_2024...">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Dossier</label>
-                    <select class="form-select" id="documentFolder">
+                    <select class="form-select" id="documentFolderSelect">
                         <!-- Folders will be populated dynamically -->
                     </select>
                 </div>
@@ -721,7 +721,6 @@
                     // Recréer les URLs blob pour les images
                     appState.documents.forEach(doc => {
                         if (doc.imageData && !doc.image) {
-                            // Recréer l'URL blob à partir des données base64
                             doc.image = doc.imageData;
                         }
                     });
@@ -739,7 +738,6 @@
                 const data = {
                     documents: appState.documents.map(doc => ({
                         ...doc,
-                        // Ne pas sauvegarder les URLs blob, seulement les données base64
                         image: doc.imageData || doc.image
                     })),
                     folders: appState.folders
@@ -788,21 +786,19 @@
             }
         }
 
-        // Gestion des documents - VERSION CORRIGÉE
-        async function saveDocument(document) {
+        // Gestion des documents
+        async function saveDocument(doc) {
             try {
-                // Préparer le document pour le stockage
                 const docToSave = {
-                    ...document,
-                    // S'assurer qu'on a une URL valide pour l'affichage
-                    image: document.image || document.imageData
+                    ...doc,
+                    image: doc.image || doc.imageData
                 };
 
                 if (appState.db) {
                     await appState.db.put('documents', docToSave);
                 }
                 await saveToLocalStorage();
-                console.log('Document sauvegardé:', document.id);
+                console.log('Document sauvegardé:', doc.id);
             } catch (error) {
                 console.error('Erreur sauvegarde document:', error);
                 throw error;
@@ -815,7 +811,6 @@
                     const docs = await appState.db.getAll('documents');
                     appState.documents = docs.map(doc => ({
                         ...doc,
-                        // S'assurer que l'URL d'image est valide
                         image: doc.image || doc.imageData
                     }));
                     renderDocuments();
@@ -889,7 +884,7 @@
             initCamera();
         }
 
-        // Capture d'image - VERSION SIMPLIFIÉE ET SÉCURISÉE
+        // Capture d'image - VERSION CORRIGÉE (conflit de nom résolu)
         async function captureImage() {
             const video = document.getElementById('cameraPreview');
             
@@ -929,11 +924,15 @@
                 // Convertir en base64 pour le stockage
                 const imageData = await blobToBase64(blob);
                 
+                // RÉSOLU : Utiliser les IDs corrects des éléments DOM
+                const docName = document.getElementById('documentNameInput').value;
+                const docFolder = document.getElementById('documentFolderSelect').value;
+                
                 // Créer le document
-                const document = {
+                const newDocument = {
                     id: Date.now(),
-                    name: document.getElementById('documentName').value || `Document_${new Date().toLocaleDateString('fr-FR')}`,
-                    folder: document.getElementById('documentFolder').value,
+                    name: docName || `Document_${new Date().toLocaleDateString('fr-FR')}`,
+                    folder: docFolder,
                     type: appState.documentType,
                     image: imageUrl,
                     imageData: imageData,
@@ -942,8 +941,8 @@
                 };
                 
                 // Sauvegarder
-                appState.documents.push(document);
-                await saveDocument(document);
+                appState.documents.push(newDocument);
+                await saveDocument(newDocument);
                 renderDocuments();
                 
                 hideProcessing();
@@ -956,7 +955,7 @@
             }
         }
 
-        // Conversion blob vers base64 - VERSION SÉCURISÉE
+        // Conversion blob vers base64
         function blobToBase64(blob) {
             return new Promise((resolve, reject) => {
                 try {
@@ -979,7 +978,7 @@
         // Traitement avec OpenCV (optionnel)
         async function processCapturedImage(blob) {
             if (!appState.openCvReady) {
-                return blob; // Retourner le blob original si OpenCV n'est pas disponible
+                return blob;
             }
             
             try {
@@ -992,25 +991,14 @@
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 
                 const src = cv.matFromImageData(imageData);
-                const dst = new cv.Mat();
-                const gray = new cv.Mat();
+                const processedBlob = await matToBlob(src);
                 
-                // Traitement basique
-                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-                cv.Canny(gray, dst, 50, 200, 3, false);
-                
-                const processedBlob = await matToBlob(src); // Retourner l'image originale pour l'instant
-                
-                // Nettoyer
                 src.delete();
-                dst.delete();
-                gray.delete();
-                
                 return processedBlob;
                 
             } catch (error) {
                 console.error('Erreur traitement OpenCV:', error);
-                return blob; // Retourner l'original en cas d'erreur
+                return blob;
             }
         }
 
@@ -1049,14 +1037,14 @@
         }
 
         // Export PDF
-        async function exportToPDF(document) {
+        async function exportToPDF(doc) {
             showProcessing('Génération PDF...');
             
             try {
                 const { PDFDocument } = PDFLib;
                 const pdfDoc = await PDFDocument.create();
                 
-                for (const pageData of document.pages) {
+                for (const pageData of doc.pages) {
                     const page = pdfDoc.addPage([595, 842]);
                     const imageBytes = base64ToUint8Array(pageData);
                     let image;
@@ -1082,7 +1070,7 @@
                 
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `${document.name}.pdf`;
+                a.download = `${doc.name}.pdf`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
@@ -1180,7 +1168,7 @@
         }
 
         function populateFolderSelect() {
-            const select = document.getElementById('documentFolder');
+            const select = document.getElementById('documentFolderSelect');
             select.innerHTML = '';
             appState.folders.forEach(folder => {
                 const option = document.createElement('option');
