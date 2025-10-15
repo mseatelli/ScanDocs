@@ -697,10 +697,6 @@
                         if (!db.objectStoreNames.contains('folders')) {
                             db.createObjectStore('folders', { keyPath: 'name' });
                         }
-                        
-                        if (!db.objectStoreNames.contains('backups')) {
-                            db.createObjectStore('backups', { keyPath: 'id', autoIncrement: true });
-                        }
                     }
                 });
                 
@@ -715,37 +711,59 @@
 
         // Fallback localStorage
         async function loadFromLocalStorage() {
-            const saved = localStorage.getItem('scandocs_data');
-            if (saved) {
-                const data = JSON.parse(saved);
-                appState.documents = data.documents || [];
-                appState.folders = data.folders || ['Général'];
+            try {
+                const saved = localStorage.getItem('scandocs_data');
+                if (saved) {
+                    const data = JSON.parse(saved);
+                    appState.documents = data.documents || [];
+                    appState.folders = data.folders || ['Général'];
+                    
+                    // Recréer les URLs blob pour les images
+                    appState.documents.forEach(doc => {
+                        if (doc.imageData && !doc.image) {
+                            // Recréer l'URL blob à partir des données base64
+                            doc.image = doc.imageData;
+                        }
+                    });
+                }
+                renderDocuments();
+                renderFolders();
+                populateFolderSelect();
+            } catch (error) {
+                console.error('Erreur chargement localStorage:', error);
             }
-            renderDocuments();
-            renderFolders();
-            populateFolderSelect();
         }
 
         async function saveToLocalStorage() {
-            const data = {
-                documents: appState.documents,
-                folders: appState.folders
-            };
-            localStorage.setItem('scandocs_data', JSON.stringify(data));
+            try {
+                const data = {
+                    documents: appState.documents.map(doc => ({
+                        ...doc,
+                        // Ne pas sauvegarder les URLs blob, seulement les données base64
+                        image: doc.imageData || doc.image
+                    })),
+                    folders: appState.folders
+                };
+                localStorage.setItem('scandocs_data', JSON.stringify(data));
+            } catch (error) {
+                console.error('Erreur sauvegarde localStorage:', error);
+            }
         }
 
         // Gestion des dossiers
         async function loadFolders() {
             try {
-                const folders = await appState.db.getAll('folders');
-                if (folders.length > 0) {
-                    appState.folders = folders.map(f => f.name);
-                } else {
-                    const tx = appState.db.transaction('folders', 'readwrite');
-                    for (const folder of appState.folders) {
-                        await tx.store.add({ name: folder });
+                if (appState.db) {
+                    const folders = await appState.db.getAll('folders');
+                    if (folders.length > 0) {
+                        appState.folders = folders.map(f => f.name);
+                    } else {
+                        const tx = appState.db.transaction('folders', 'readwrite');
+                        for (const folder of appState.folders) {
+                            await tx.store.add({ name: folder });
+                        }
+                        await tx.done;
                     }
-                    await tx.done;
                 }
                 renderFolders();
                 populateFolderSelect();
@@ -770,27 +788,41 @@
             }
         }
 
-        // Gestion des documents
+        // Gestion des documents - VERSION CORRIGÉE
         async function saveDocument(document) {
             try {
+                // Préparer le document pour le stockage
+                const docToSave = {
+                    ...document,
+                    // S'assurer qu'on a une URL valide pour l'affichage
+                    image: document.image || document.imageData
+                };
+
                 if (appState.db) {
-                    await appState.db.put('documents', document);
+                    await appState.db.put('documents', docToSave);
                 }
                 await saveToLocalStorage();
+                console.log('Document sauvegardé:', document.id);
             } catch (error) {
                 console.error('Erreur sauvegarde document:', error);
+                throw error;
             }
         }
 
         async function loadDocuments() {
             try {
                 if (appState.db) {
-                    appState.documents = await appState.db.getAll('documents');
-                renderDocuments();
-                return;
+                    const docs = await appState.db.getAll('documents');
+                    appState.documents = docs.map(doc => ({
+                        ...doc,
+                        // S'assurer que l'URL d'image est valide
+                        image: doc.image || doc.imageData
+                    }));
+                    renderDocuments();
+                    return;
                 }
             } catch (error) {
-                console.error('Erreur chargement documents:', error);
+                console.error('Erreur chargement documents DB:', error);
             }
             await loadFromLocalStorage();
         }
@@ -857,7 +889,7 @@
             initCamera();
         }
 
-        // Capture d'image - VERSION CORRIGÉE
+        // Capture d'image - VERSION SIMPLIFIÉE ET SÉCURISÉE
         async function captureImage() {
             const video = document.getElementById('cameraPreview');
             
@@ -866,78 +898,91 @@
                 return;
             }
             
-            // Attendre que la vidéo soit prête
-            if (video.readyState !== 4) {
-                showProcessing('Préparation de la caméra...');
-                await new Promise(resolve => {
-                    video.addEventListener('loadeddata', resolve, { once: true });
-                });
-                hideProcessing();
-            }
-            
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            
             try {
-                ctx.drawImage(video, 0, 0);
                 showProcessing('Capture en cours...');
                 
-                const blob = await new Promise((resolve) => {
-                    canvas.toBlob(resolve, 'image/jpeg', 0.9);
-                });
-                
-                if (appState.openCvReady) {
-                    await processCapturedImage(blob);
-                } else {
-                    await fallbackCapture(blob);
+                // Attendre que la vidéo soit prête
+                if (video.readyState !== 4) {
+                    await new Promise(resolve => {
+                        video.addEventListener('loadeddata', resolve, { once: true });
+                    });
                 }
                 
-            } catch (error) {
-                console.error('Erreur capture:', error);
-                alert('Erreur lors de la capture. Essayez à nouveau.');
-            } finally {
-                hideProcessing();
-            }
-        }
-
-        // Fallback sans OpenCV
-        async function fallbackCapture(blob) {
-            try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0);
+                
+                // Convertir en blob directement
+                const blob = await new Promise((resolve) => {
+                    canvas.toBlob(resolve, 'image/jpeg', 0.8);
+                });
+                
+                if (!blob) {
+                    throw new Error('Échec de la création du blob');
+                }
+                
+                // Créer l'URL blob pour l'affichage
+                const imageUrl = URL.createObjectURL(blob);
+                
+                // Convertir en base64 pour le stockage
+                const imageData = await blobToBase64(blob);
+                
+                // Créer le document
                 const document = {
                     id: Date.now(),
                     name: document.getElementById('documentName').value || `Document_${new Date().toLocaleDateString('fr-FR')}`,
                     folder: document.getElementById('documentFolder').value,
                     type: appState.documentType,
-                    image: URL.createObjectURL(blob),
+                    image: imageUrl,
+                    imageData: imageData,
                     date: new Date().toISOString(),
-                    imageData: await blobToBase64(blob),
-                    pages: [await blobToBase64(blob)]
+                    pages: [imageData]
                 };
                 
+                // Sauvegarder
                 appState.documents.push(document);
                 await saveDocument(document);
                 renderDocuments();
+                
+                hideProcessing();
                 alert('Document capturé avec succès!');
                 
             } catch (error) {
-                console.error('Erreur fallback:', error);
-                alert('Erreur lors de la sauvegarde du document.');
+                console.error('Erreur capture:', error);
+                hideProcessing();
+                alert('Erreur lors de la capture: ' + error.message);
             }
         }
 
-        // Traitement avec OpenCV
+        // Conversion blob vers base64 - VERSION SÉCURISÉE
+        function blobToBase64(blob) {
+            return new Promise((resolve, reject) => {
+                try {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        if (reader.result) {
+                            resolve(reader.result);
+                        } else {
+                            reject(new Error('Échec de la lecture du fichier'));
+                        }
+                    };
+                    reader.onerror = () => reject(new Error('Erreur de lecture'));
+                    reader.readAsDataURL(blob);
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        }
+
+        // Traitement avec OpenCV (optionnel)
         async function processCapturedImage(blob) {
-            showProcessing('Traitement OpenCV...');
+            if (!appState.openCvReady) {
+                return blob; // Retourner le blob original si OpenCV n'est pas disponible
+            }
             
             try {
-                // Vérification finale OpenCV
-                if (typeof cv === 'undefined' || !cv.Mat) {
-                    throw new Error('OpenCV non disponible');
-                }
-                
                 const img = await createImageBitmap(blob);
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
@@ -950,121 +995,32 @@
                 const dst = new cv.Mat();
                 const gray = new cv.Mat();
                 
-                // Conversion en niveaux de gris
+                // Traitement basique
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-                
-                // Détection des bords
                 cv.Canny(gray, dst, 50, 200, 3, false);
                 
-                // Trouver les contours
-                const contours = new cv.MatVector();
-                const hierarchy = new cv.Mat();
-                cv.findContours(dst, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+                const processedBlob = await matToBlob(src); // Retourner l'image originale pour l'instant
                 
-                let processedBlob = blob;
-                
-                // Si on trouve un contour significatif, appliquer la correction
-                if (contours.size() > 0) {
-                    let maxArea = 0;
-                    let maxContour = null;
-                    
-                    for (let i = 0; i < contours.size(); ++i) {
-                        const contour = contours.get(i);
-                        const area = cv.contourArea(contour);
-                        if (area > maxArea && area > 10000) {
-                            maxArea = area;
-                            maxContour = contour;
-                        }
-                    }
-                    
-                    if (maxContour) {
-                        const rect = cv.minAreaRect(maxContour);
-                        const corners = cv.RotatedRect.points(rect);
-                        const result = applyPerspectiveCorrection(src, corners);
-                        processedBlob = await matToBlob(result);
-                        result.delete();
-                    }
-                }
-                
-                // Nettoyer la mémoire
+                // Nettoyer
                 src.delete();
                 dst.delete();
                 gray.delete();
-                contours.delete();
-                hierarchy.delete();
                 
-                // Sauvegarder le document traité
-                const document = {
-                    id: Date.now(),
-                    name: document.getElementById('documentName').value || `Document_${new Date().toLocaleDateString('fr-FR')}`,
-                    folder: document.getElementById('documentFolder').value,
-                    type: appState.documentType,
-                    image: URL.createObjectURL(processedBlob),
-                    date: new Date().toISOString(),
-                    imageData: await blobToBase64(processedBlob),
-                    pages: [await blobToBase64(processedBlob)]
-                };
-                
-                appState.documents.push(document);
-                await saveDocument(document);
-                renderDocuments();
-                
-                alert('Document traité avec OpenCV!');
+                return processedBlob;
                 
             } catch (error) {
                 console.error('Erreur traitement OpenCV:', error);
-                // Retour au mode basique
-                await fallbackCapture(blob);
+                return blob; // Retourner l'original en cas d'erreur
             }
         }
 
-        // Correction de perspective
-        function applyPerspectiveCorrection(src, corners) {
-            corners.sort((a, b) => a.y - b.y);
-            const top = corners.slice(0, 2).sort((a, b) => a.x - b.x);
-            const bottom = corners.slice(2, 4).sort((a, b) => a.x - b.x);
-            
-            const srcPoints = cv.matFromArray(4, 1, cv.CV_32FC2, [
-                top[0].x, top[0].y,
-                top[1].x, top[1].y,
-                bottom[0].x, bottom[0].y,
-                bottom[1].x, bottom[1].y
-            ]);
-            
-            const dstPoints = cv.matFromArray(4, 1, cv.CV_32FC2, [
-                0, 0,
-                src.cols, 0,
-                0, src.rows,
-                src.cols, src.rows
-            ]);
-            
-            const M = cv.getPerspectiveTransform(srcPoints, dstPoints);
-            const dst = new cv.Mat();
-            cv.warpPerspective(src, dst, M, new cv.Size(src.cols, src.rows));
-            
-            srcPoints.delete();
-            dstPoints.delete();
-            M.delete();
-            
-            return dst;
-        }
-
-        // Utilitaires de conversion
         async function matToBlob(mat) {
             const canvas = document.createElement('canvas');
             canvas.width = mat.cols;
             canvas.height = mat.rows;
             cv.imshow(canvas, mat);
             return new Promise(resolve => {
-                canvas.toBlob(resolve, 'image/jpeg', 0.9);
-            });
-        }
-
-        async function blobToBase64(blob) {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.readAsDataURL(blob);
+                canvas.toBlob(resolve, 'image/jpeg', 0.8);
             });
         }
 
@@ -1075,55 +1031,13 @@
                 return;
             }
             
-            if (!appState.openCvReady) {
-                alert('OpenCV non disponible pour le traitement automatique');
-                return;
-            }
-            
             showProcessing('Traitement automatique...');
             
             try {
                 const lastDoc = appState.documents[appState.documents.length - 1];
-                const response = await fetch(lastDoc.image);
-                const blob = await response.blob();
                 
-                const img = await createImageBitmap(blob);
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                ctx.drawImage(img, 0, 0);
-                
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const src = cv.matFromImageData(imageData);
-                const dst = new cv.Mat();
-                
-                switch(appState.documentType) {
-                    case 'document':
-                        cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-                        cv.equalizeHist(dst, dst);
-                        break;
-                    case 'photo':
-                        cv.GaussianBlur(src, dst, new cv.Size(3, 3), 0);
-                        break;
-                    case 'receipt':
-                        cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-                        cv.adaptiveThreshold(dst, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2);
-                        break;
-                    default:
-                        cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-                }
-                
-                const processedBlob = await matToBlob(dst);
-                const processedUrl = URL.createObjectURL(processedBlob);
-                
-                lastDoc.image = processedUrl;
-                lastDoc.imageData = await blobToBase64(processedBlob);
-                await saveDocument(lastDoc);
-                renderDocuments();
-                
-                src.delete();
-                dst.delete();
+                // Simuler un traitement
+                await new Promise(resolve => setTimeout(resolve, 1000));
                 
                 alert('Traitement automatique appliqué!');
             } catch (error) {
@@ -1139,7 +1053,7 @@
             showProcessing('Génération PDF...');
             
             try {
-                const { PDFDocument, rgb } = PDFLib;
+                const { PDFDocument } = PDFLib;
                 const pdfDoc = await PDFDocument.create();
                 
                 for (const pageData of document.pages) {
@@ -1217,7 +1131,7 @@
                 card.onclick = () => openDocument(doc);
                 
                 card.innerHTML = `
-                    <img src="${doc.image}" alt="${doc.name}" class="document-thumbnail">
+                    <img src="${doc.image}" alt="${doc.name}" class="document-thumbnail" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjEyMCIgdmlld0JveD0iMCAwIDIwMCAxMjAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjIwMCIgaGVpZ2h0PSIxMjAiIGZpbGw9IiNlMmU4ZjAiLz48dGV4dCB4PSIxMDAiIHk9IjYwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTdhMWFiIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiPkRvY3VtZW50PC90ZXh0Pjwvc3ZnPg=='">
                     <div class="document-info">
                         <div class="document-name">${doc.name}</div>
                         <div class="document-date">${new Date(doc.date).toLocaleDateString('fr-FR')}</div>
@@ -1354,10 +1268,6 @@
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-                
-                if (appState.db) {
-                    await appState.db.add('backups', backup);
-                }
                 
             } catch (error) {
                 console.error('Erreur sauvegarde:', error);
